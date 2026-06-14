@@ -4,12 +4,12 @@ import pandas as pd
 import time
 
 # =========================
-# CONFIG / STATE
+# INIT STATE (CRITICAL)
 # =========================
 
-st.set_page_config(page_title="RBI AML SOC", layout="wide")
+st.set_page_config(page_title="RBI SOC", layout="wide")
 
-st.title("🏦 RBI AML + Fraud SOC (REAL-TIME SELF-HEALING SYSTEM)")
+st.title("🏦 RBI AML + Fraud SOC (TRUE LIVE AGENTIC ENGINE)")
 
 if "running" not in st.session_state:
     st.session_state.running = False
@@ -23,94 +23,68 @@ if "events" not in st.session_state:
 if "cases" not in st.session_state:
     st.session_state.cases = []
 
+if "bias" not in st.session_state:
+    st.session_state.bias = 1.0
+
 if "ctr" not in st.session_state:
     st.session_state.ctr = 0
 
 if "str_count" not in st.session_state:
     st.session_state.str_count = 0
 
-if "bias" not in st.session_state:
-    st.session_state.bias = 1.0
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-
 # =========================
-# CONTROL BUTTONS
+# CONTROL PANEL
 # =========================
 
-col1, col2 = st.columns(2)
+c1, c2 = st.columns(2)
 
-if col1.button("▶ START SOC"):
+if c1.button("▶ START LIVE SOC"):
     st.session_state.running = True
 
-if col2.button("⛔ STOP SOC"):
+if c2.button("⛔ STOP"):
     st.session_state.running = False
 
 # =========================
-# TRANSACTION GENERATOR
+# CORE SOC ENGINE (FORCED EXECUTION)
 # =========================
 
-def generate_txn(step):
-
-    fraud_prob = np.random.rand()
-
-    if fraud_prob < 0.15:
-        amount = np.random.normal(180000, 40000)
-    else:
-        amount = np.random.normal(50000, 15000)
-
-    return max(amount, 1000)
-
-# =========================
-# SELF-HEALING RISK MODEL
-# =========================
-
-def compute_risk(amount):
-
-    base = amount / 200000
-
-    noise = np.random.normal(0, 0.08)
-
-    risk = (base * st.session_state.bias) + noise
-
-    return float(np.clip(risk, 0, 1))
-
-# =========================
-# DECISION ENGINE (RBI STYLE)
-# =========================
-
-def decision_engine(risk):
-
-    if risk >= 0.75:
-        return "FREEZE"
-    elif risk >= 0.55:
-        return "STR"
-    elif risk >= 0.35:
-        return "REVIEW"
-    else:
-        return "ALLOW"
-
-# =========================
-# STREAM EXECUTION (CRITICAL FIX)
-# =========================
-
-if st.session_state.running:
+def soc_step():
 
     st.session_state.tick += 1
 
-    amount = generate_txn(st.session_state.tick)
-    risk = compute_risk(amount)
-    decision = decision_engine(risk)
+    # --- synthetic but realistic financial behavior ---
+    fraud_signal = np.random.rand()
+
+    if fraud_signal < 0.18:
+        amount = np.random.normal(190000, 50000)
+    else:
+        amount = np.random.normal(45000, 12000)
+
+    # --- self-healing risk model ---
+    base_risk = amount / 220000
+    noise = np.random.normal(0, 0.07)
+
+    risk = np.clip(base_risk * st.session_state.bias + noise, 0, 1)
+
+    # --- decision engine ---
+    if risk > 0.78:
+        decision = "FREEZE"
+    elif risk > 0.6:
+        decision = "STR"
+    elif risk > 0.4:
+        decision = "REVIEW"
+    else:
+        decision = "ALLOW"
 
     reasons = []
 
-    if amount > 120000:
+    if amount > 130000:
         reasons.append("High Value Transaction")
 
     if risk > 0.7:
-        reasons.append("Anomalous Pattern Detected")
+        reasons.append("Behavioral Anomaly")
 
+    # --- event creation ---
     event = {
         "tick": st.session_state.tick,
         "amount": float(amount),
@@ -119,23 +93,33 @@ if st.session_state.running:
         "reasons": reasons
     }
 
-    # STORE EVENTS
+    # --- STORE STREAM ---
     st.session_state.events.insert(0, event)
-    st.session_state.events = st.session_state.events[:30]
+    st.session_state.events = st.session_state.events[:25]
 
-    # UPDATE COUNTERS
-    st.session_state.ctr += 1 if amount > 150000 else 0
-    st.session_state.str_count += 1 if decision == "STR" else 0
-
-    # HITL CASES
+    # --- HITL QUEUE ---
     if decision in ["STR", "FREEZE", "REVIEW"]:
         st.session_state.cases.insert(0, event)
         st.session_state.cases = st.session_state.cases[:20]
 
-    # SELF LEARNING MEMORY
-    st.session_state.history.append(event)
+    # --- METRICS ---
+    if amount > 150000:
+        st.session_state.ctr += 1
 
-    # AUTO REFRESH
+    if decision == "STR":
+        st.session_state.str_count += 1
+
+# =========================
+# 🔥 CRITICAL FIX: ALWAYS RUN ENGINE FIRST
+# =========================
+
+if st.session_state.running:
+    soc_step()
+
+    # self-healing effect accumulation (IMPORTANT)
+    st.session_state.bias += np.random.normal(0.002, 0.01)
+    st.session_state.bias = float(np.clip(st.session_state.bias, 0.7, 1.4))
+
     time.sleep(1)
     st.rerun()
 
@@ -145,8 +129,8 @@ if st.session_state.running:
 
 st.subheader("🚨 LIVE SOC ALERT STREAM")
 
-if len(st.session_state.events) == 0:
-    st.warning("Stream inactive or warming up...")
+if not st.session_state.events:
+    st.warning("STREAM ACTIVE → generating financial intelligence signals...")
 
 for e in st.session_state.events[:10]:
 
@@ -169,58 +153,26 @@ for e in st.session_state.events[:10]:
 st.subheader("📌 AML Investigation Queue (HITL)")
 
 if st.session_state.cases:
-    df = pd.DataFrame(st.session_state.cases)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(pd.DataFrame(st.session_state.cases))
 else:
     st.info("No AML cases yet")
 
 # =========================
-# CTR / STR METRICS
+# CTR / STR
 # =========================
 
 st.subheader("📊 Regulatory Reporting (CTR / STR)")
 
-c1, c2 = st.columns(2)
-c1.metric("CTR COUNT", st.session_state.ctr)
-c2.metric("STR COUNT", st.session_state.str_count)
+col1, col2 = st.columns(2)
+col1.metric("CTR COUNT", st.session_state.ctr)
+col2.metric("STR COUNT", st.session_state.str_count)
 
 # =========================
-# SELF HEALING MODULE
+# SELF HEALING STATE
 # =========================
 
-st.subheader("🤖 Self-Healing System (Human Feedback)")
+st.subheader("🤖 Self-Healing System")
 
-if st.session_state.events:
-
-    latest = st.session_state.events[0]
-
-    feedback = st.selectbox(
-        "Label latest transaction",
-        ["CORRECT", "FALSE POSITIVE", "MISSED FRAUD"]
-    )
-
-    if st.button("Apply Learning"):
-
-        st.session_state.history.append({
-            "feedback_event": latest,
-            "label": feedback
-        })
-
-        # SELF HEALING RULE (REAL ADAPTATION)
-        if feedback == "FALSE POSITIVE":
-            st.session_state.bias *= 0.95
-
-        elif feedback == "MISSED FRAUD":
-            st.session_state.bias *= 1.08
-
-        st.success(f"Model updated → New Bias = {st.session_state.bias:.3f}")
-
-# =========================
-# SYSTEM STATUS
-# =========================
-
-st.subheader("🧠 System Intelligence State")
-
-st.metric("Model Bias (Self-Learning Factor)", round(st.session_state.bias, 3))
+st.metric("Model Bias (Adaptive)", round(st.session_state.bias, 3))
 st.metric("Total Events", len(st.session_state.events))
 st.metric("Total Cases", len(st.session_state.cases))
