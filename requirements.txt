@@ -4,7 +4,9 @@ numpy
 scikit-learn
 xgboost
 lightgbm
-joblib
 umap-learn
 hdbscan
+joblib
 shap
+scipy
+openpyxl
