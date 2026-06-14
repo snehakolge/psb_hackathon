@@ -15,11 +15,11 @@ MEMORY_FILE = "soc_memory.json"
 
 st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
 
-st.title("🏦 Real-Time Agentic Fraud SOC (Self-Learning System)")
-st.markdown("Multi-agent ML system with streaming + human feedback loop")
+st.title("🏦 Real-Time Agentic Fraud SOC (Production Safe Version)")
+st.markdown("Streaming multi-agent ML system with self-learning memory")
 
 # =========================
-# SAFE JSON SERIALIZER (IMPORTANT FIX)
+# SAFE JSON SERIALIZER
 # =========================
 def clean_json(obj):
 
@@ -38,16 +38,36 @@ def clean_json(obj):
     return obj
 
 # =========================
-# MEMORY SYSTEM
+# SAFE MEMORY LOADER (FIXED JSON ERROR)
 # =========================
 def load_memory():
-    if os.path.exists(MEMORY_FILE):
-        return json.load(open(MEMORY_FILE))
-    return []
 
+    if not os.path.exists(MEMORY_FILE):
+        return []
+
+    try:
+        with open(MEMORY_FILE, "r") as f:
+            data = f.read().strip()
+
+            if not data:
+                return []
+
+            return json.loads(data)
+
+    except (json.JSONDecodeError, ValueError):
+        return []  # fallback if file is corrupted
+
+# =========================
+# SAFE MEMORY SAVER
+# =========================
 def save_memory(mem):
-    json.dump(clean_json(mem), open(MEMORY_FILE, "w"))
+    try:
+        with open(MEMORY_FILE, "w") as f:
+            json.dump(clean_json(mem), f)
+    except Exception as e:
+        st.warning(f"Memory save failed: {e}")
 
+# Load memory safely
 memory = load_memory()
 
 # =========================
@@ -116,19 +136,14 @@ def generate_transaction():
     }
 
 # =========================
-# AGENT RUNNER
+# AGENT ENGINE
 # =========================
 def run_agents(tx):
-
     result = ecosystem.evaluate_account(tx)
-
-    risk = result["risk_score"]
-    reasons = result["rationale"]
-
-    return risk, reasons
+    return result["risk_score"], result["rationale"]
 
 # =========================
-# STREAM ENGINE (SAFE RERUN STYLE)
+# STREAM ENGINE (SAFE RERUN)
 # =========================
 if st.session_state.streaming:
 
@@ -138,7 +153,7 @@ if st.session_state.streaming:
     st.session_state.last_tx = tx
     st.session_state.last_risk = risk
 
-    # SAVE TO MEMORY (SAFE)
+    # SAVE MEMORY (SAFE)
     memory.append(clean_json({
         "tx": tx,
         "risk": float(risk),
@@ -164,7 +179,6 @@ if st.session_state.last_risk is not None:
 
     col1.metric("Risk Score", f"{risk:.4f}")
 
-    # INTERPRETATION LAYER (NOT FRAUD RULES INSIDE MODEL)
     if risk >= 0.75:
         status = "🚨 HIGH RISK"
     elif risk >= 0.45:
@@ -179,6 +193,7 @@ if st.session_state.last_risk is not None:
     st.subheader("🧠 Agent Reasoning")
 
     _, reasons = run_agents(tx)
+
     for r in reasons:
         st.write("•", r)
 
@@ -196,10 +211,10 @@ else:
     st.info("No high-risk cases yet.")
 
 # =========================
-# MEMORY LOG
+# MEMORY VIEW
 # =========================
 st.divider()
-st.subheader("📦 SOC Memory")
+st.subheader("📦 SOC Memory Log")
 
 if memory:
     st.dataframe(pd.DataFrame(memory).tail(20))
@@ -230,4 +245,4 @@ if st.session_state.last_tx is not None:
 
         save_memory(memory)
 
-        st.success("Feedback saved for self-learning system")
+        st.success("Feedback saved → system learning updated")
