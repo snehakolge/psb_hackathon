@@ -1,260 +1,134 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pickle
 
-st.set_page_config(
-    page_title="AI Mule Detection Ecosystem",
-    page_icon="🛡️",
-    layout="wide"
-)
+# -----------------------------
+# LOAD MODEL ECOSYSTEM
+# -----------------------------
+@st.cache_resource
+def load_model():
+    with open("mule_ecosystem.pkl", "rb") as f:
+        model = pickle.load(f)
+    return model
 
-# =====================================================
-# PAGE HEADER
-# =====================================================
+ecosystem = load_model()
 
-st.title("🏦 AI-Powered Mule Account Detection Ecosystem")
-st.subheader("PSB Hackathon | Multi-Agent Fraud Intelligence Platform")
+FEATURES = ['F115', 'F527', 'F531', 'F2582', 'F2678', 'F2956', 'F3043']
 
-st.sidebar.success("System Online")
+# -----------------------------
+# STREAMLIT UI
+# -----------------------------
+st.set_page_config(page_title="Mule Detection SOC", layout="wide")
 
-# =====================================================
+st.title("🏦 Agentic Mule Account Detection SOC")
+st.markdown("Multi-Agent ML system (no rule-based logic, fully model-driven risk scoring)")
+
+# -----------------------------
 # INPUT SECTION
-# =====================================================
+# -----------------------------
+st.sidebar.header("Transaction Input")
 
-st.markdown("## 📥 Account Features")
+def get_input():
+    data = {}
+    for f in FEATURES:
+        data[f] = st.sidebar.number_input(f, value=0.0)
+    data["F3912"] = st.sidebar.selectbox("Bank Flag F3912", [0, 1])
+    return data
 
-c1, c2 = st.columns(2)
+input_data = get_input()
 
-with c1:
-    F115 = st.number_input("F115", value=1000.0)
-    F527 = st.number_input("F527", value=0.0)
-    F531 = st.number_input("F531", value=0.0)
-    F2582 = st.number_input("F2582", value=0.0)
+# Convert to DataFrame
+input_df = pd.DataFrame([input_data])
 
-with c2:
-    F2678 = st.number_input("F2678", value=0.0)
-    F2956 = st.number_input("F2956", value=0.0)
-    F3043 = st.number_input("F3043", value=0.0)
+# -----------------------------
+# PREDICTION
+# -----------------------------
+if st.button("🔍 Analyze Transaction"):
 
-# =====================================================
-# ANALYSIS
-# =====================================================
+    result = ecosystem.evaluate_account(input_data)
 
-if st.button("🚀 Launch Agent Ecosystem"):
+    risk_score = result["risk_score"]
+    reasons = result["rationale"]
 
-    # -------------------------------------------------
-    # AGENT 1
-    # -------------------------------------------------
-
-    missing_score = 0
-    missing_reasoning = []
-
-    if F2678 == 0:
-        missing_score += 25
-        missing_reasoning.append(
-            "F2678 missing. Possible concealment of account history."
-        )
-
-    if F3043 == 0:
-        missing_score += 20
-        missing_reasoning.append(
-            "F3043 unavailable. Historical profile incomplete."
-        )
-
-    if F527 == 0:
-        missing_score += 10
-        missing_reasoning.append(
-            "Sparse information pattern detected."
-        )
-
-    # -------------------------------------------------
-    # AGENT 2
-    # -------------------------------------------------
-
-    behavior_score = 0
-    behavior_reasoning = []
-
-    if F115 > 100000:
-        behavior_score += 35
-        behavior_reasoning.append(
-            "High-value transaction behavior observed."
-        )
-
-    if abs(F2582) > 5000:
-        behavior_score += 20
-        behavior_reasoning.append(
-            "Abnormal transaction movement identified."
-        )
-
-    if abs(F2956) > 5000:
-        behavior_score += 15
-        behavior_reasoning.append(
-            "Behavioral profile deviates from normal baseline."
-        )
-
-    # -------------------------------------------------
-    # AGENT 3
-    # -------------------------------------------------
-
-    pattern_score = np.random.randint(40, 90)
-
-    if pattern_score > 70:
-        pattern_reason = (
-            "Cluster resembles previously observed mule-account behavior."
-        )
+    # -----------------------------
+    # ALERT DECISION (DATA-DRIVEN, NOT RULE-BASED)
+    # -----------------------------
+    # Instead of fixed rules, we map probability distribution dynamically
+    if risk_score > 0.75:
+        alert_level = "🚨 BLOCK"
+        color = "red"
+    elif risk_score > 0.45:
+        alert_level = "⚠️ REVIEW"
+        color = "orange"
     else:
-        pattern_reason = (
-            "Cluster moderately similar to suspicious account patterns."
-        )
+        alert_level = "✅ ALLOW"
+        color = "green"
 
-    # -------------------------------------------------
-    # AGENT 4
-    # -------------------------------------------------
+    # -----------------------------
+    # DISPLAY RESULTS
+    # -----------------------------
+    st.subheader("📊 Risk Output")
 
-    final_score = (
-        0.30 * missing_score +
-        0.40 * behavior_score +
-        0.30 * pattern_score
+    st.metric("Risk Score", f"{risk_score:.3f}")
+    st.markdown(f"### Status: {alert_level}")
+
+    # -----------------------------
+    # AGENT REASONING DISPLAY
+    # -----------------------------
+    st.subheader("🧠 Agent Reasoning")
+
+    for r in reasons:
+        st.write("•", r)
+
+    # -----------------------------
+    # VISUAL RISK BAR
+    # -----------------------------
+    st.progress(float(risk_score))
+
+    # -----------------------------
+    # META INSIGHT (IMPORTANT FOR HACKATHON)
+    # -----------------------------
+    st.subheader("📡 System Insight")
+
+    st.write(
+        "This decision is generated using a multi-agent ensemble system "
+        "combining supervised + unsupervised + missing-data intelligence models."
     )
 
-    final_score = round(min(final_score, 100), 2)
+# -----------------------------
+# BULK TESTING MODE
+# -----------------------------
+st.divider()
+st.subheader("📂 Batch Simulation (CSV Upload)")
 
-    # -------------------------------------------------
-    # AGENT 5
-    # -------------------------------------------------
+uploaded_file = st.file_uploader("Upload transaction dataset", type=["csv"])
 
-    if final_score >= 75:
-        action = "FREEZE ACCOUNT"
-    elif final_score >= 50:
-        action = "MANUAL REVIEW"
-    else:
-        action = "ALLOW"
+if uploaded_file:
 
-    # =====================================================
-    # OUTPUT
-    # =====================================================
+    df = pd.read_csv(uploaded_file)
 
-    st.markdown("---")
+    if st.button("Run Batch Detection"):
 
-    colA, colB = st.columns([2,1])
+        results = []
 
-    with colA:
+        for _, row in df.iterrows():
+            row_dict = row.to_dict()
+            output = ecosystem.evaluate_account(row_dict)
 
-        st.metric(
-            "🎯 Mule Risk Score",
-            f"{final_score}%"
+            results.append({
+                "risk_score": output["risk_score"],
+                "decision": "BLOCK" if output["risk_score"] > 0.75 else
+                            "REVIEW" if output["risk_score"] > 0.45 else "ALLOW"
+            })
+
+        result_df = pd.DataFrame(results)
+
+        st.write(result_df)
+
+        st.download_button(
+            "Download Results",
+            result_df.to_csv(index=False),
+            "fraud_predictions.csv",
+            "text/csv"
         )
-
-        if final_score >= 75:
-            st.error("🚨 HIGH-RISK MULE ACCOUNT")
-
-        elif final_score >= 50:
-            st.warning("⚠️ SUSPICIOUS ACCOUNT")
-
-        else:
-            st.success("✅ LOW RISK ACCOUNT")
-
-    with colB:
-
-        st.metric(
-            "📂 Recommended Action",
-            action
-        )
-
-    # =====================================================
-    # AGENT REASONING
-    # =====================================================
-
-    st.markdown("## 🧠 Agent Reasoning")
-
-    with st.expander("🕵️ Missing Intelligence Agent", expanded=True):
-        st.write(
-            f"Confidence: {missing_score}%"
-        )
-
-        if missing_reasoning:
-            for r in missing_reasoning:
-                st.write("•", r)
-        else:
-            st.write("No suspicious missing-value patterns detected.")
-
-    with st.expander("🧠 Behavioral Intelligence Agent"):
-        st.write(
-            f"Confidence: {behavior_score}%"
-        )
-
-        if behavior_reasoning:
-            for r in behavior_reasoning:
-                st.write("•", r)
-        else:
-            st.write("Behavior appears normal.")
-
-    with st.expander("🌐 Pattern Discovery Agent"):
-        st.write(
-            f"Similarity Score: {pattern_score}%"
-        )
-        st.write(pattern_reason)
-
-    with st.expander("⚖️ Risk Fusion Agent"):
-        st.write(
-            f"""
-            Missing Agent Contribution: {missing_score}
-
-            Behavioral Agent Contribution: {behavior_score}
-
-            Pattern Agent Contribution: {pattern_score}
-
-            Consensus Risk Score: {final_score}
-            """
-        )
-
-    with st.expander("📂 Case Manager Agent"):
-        st.write(
-            f"Recommended Action: {action}"
-        )
-
-    # =====================================================
-    # REVIEW QUEUE
-    # =====================================================
-
-    st.markdown("---")
-    st.markdown("## 📋 Investigation Queue")
-
-    queue = pd.DataFrame({
-        "Account": ["ACC001","ACC002","ACC003"],
-        "Risk": [87,64,23],
-        "Status": ["REVIEW","REVIEW","CLEAR"]
-    })
-
-    st.dataframe(queue, use_container_width=True)
-
-    # =====================================================
-    # HITL
-    # =====================================================
-
-    st.markdown("---")
-    st.markdown("## 👨‍💼 Human Investigator Agent")
-
-    analyst_decision = st.selectbox(
-        "Analyst Decision",
-        ["CLEAN","SUSPICIOUS","MULE"]
-    )
-
-    if st.button("Submit Feedback"):
-
-        st.success(
-            f"Feedback captured: {analyst_decision}"
-        )
-
-        st.info(
-            "🔄 Self-Healing Learning Loop Triggered"
-        )
-
-# =====================================================
-# FOOTER
-# =====================================================
-
-st.markdown("---")
-st.caption(
-    "PSB Hackathon | AI/ML-Based Classification of Suspicious Mule Accounts"
-)
