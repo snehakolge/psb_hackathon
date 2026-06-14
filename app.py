@@ -10,12 +10,11 @@ from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 # =========================================================
 FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
 
-st.set_page_config(page_title="RBI AML SOC", layout="wide")
-
-st.title("🏦 RBI AML + Fraud SOC (Guaranteed Alert Stream System)")
+st.set_page_config(page_title="AML SOC", layout="wide")
+st.title("🏦 RBI AML + Fraud SOC (LIVE GUARANTEED STREAM)")
 
 # =========================================================
-# STATE INIT
+# STATE INIT (CRITICAL FIX)
 # =========================================================
 if "running" not in st.session_state:
     st.session_state.running = False
@@ -30,7 +29,7 @@ if "cases" not in st.session_state:
     st.session_state.cases = []
 
 # =========================================================
-# ML ECOSYSTEM
+# ML ENGINE
 # =========================================================
 @st.cache_resource
 def load_ecosystem():
@@ -39,188 +38,133 @@ def load_ecosystem():
 ecosystem = load_ecosystem()
 
 # =========================================================
-# TRANSACTION GENERATOR
+# TRANSACTION GENERATOR (FORCED VARIANCE)
 # =========================================================
-def generate_transaction(tick):
+def generate_transaction():
 
-    fraud = np.random.rand() < 0.5  # HIGH SIGNAL FOR DEMO
+    fraud = np.random.rand() < 0.6  # HIGH for demo stability
 
-    if fraud:
-        return {
-            "F115": np.random.normal(220000, 80000),
-            "F527": np.random.normal(3500, 1000),
-            "F531": np.nan,
-            "F2582": np.nan,
-            "F2678": np.random.normal(11000, 3000),
-            "F2956": np.random.normal(9000, 2500),
-            "F3043": np.random.normal(7000, 2000),
-            "F3912": 1
-        }
-
-    return {
-        "F115": np.random.normal(40000, 18000),
-        "F527": np.random.normal(140, 70),
-        "F531": np.random.normal(100, 40),
-        "F2582": np.random.normal(320, 130),
-        "F2678": np.random.normal(500, 200),
-        "F2956": np.random.normal(280, 110),
-        "F3043": np.random.normal(200, 90),
-        "F3912": np.random.choice([0, 1], p=[0.85, 0.15])
+    base = {
+        "F115": np.random.normal(50000, 20000),
+        "F527": np.random.normal(200, 100),
+        "F531": np.random.normal(150, 80),
+        "F2582": np.random.normal(300, 120),
+        "F2678": np.random.normal(400, 150),
+        "F2956": np.random.normal(250, 90),
+        "F3043": np.random.normal(200, 70),
+        "F3912": 1 if fraud else 0
     }
 
-# =========================================================
-# AML POLICY ENGINE (NO SILENT MODE)
-# =========================================================
-def aml_policy(risk, amount):
+    if fraud:
+        base["F115"] = np.random.normal(180000, 60000)
 
-    ctr = amount > 500000
-
-    # 🔥 FORCE SOC ACTIVITY ALWAYS
-    if risk > 0.50:
-        return "FREEZE", "ESCALATED", ctr, True
-
-    if risk > 0.25:
-        return "REFER", "OPEN", ctr, True
-
-    return "ALERT", "WATCHLIST", ctr, False
+    return base
 
 # =========================================================
-# STREAM ENGINE (CRITICAL FIX)
+# POLICY ENGINE (FIXED)
 # =========================================================
-def stream_tick():
+def policy(risk):
+
+    if risk > 0.6:
+        return "FREEZE"
+    elif risk > 0.35:
+        return "REVIEW"
+    else:
+        return "ALLOW"
+
+# =========================================================
+# STREAM STEP (CRITICAL FIX)
+# =========================================================
+def step():
 
     st.session_state.tick += 1
 
-    tx = generate_transaction(st.session_state.tick)
+    tx = generate_transaction()
 
     result = ecosystem.evaluate_account(tx)
 
-    raw_risk = float(result["risk_score"])
+    risk = float(result["risk_score"])
 
-    # 🔥 SOC ESCALATION LAYER (FOR GUARANTEED OUTPUT)
-    shock = 0.25 if tx["F115"] > 80000 else 0.1
-    fraud_boost = 0.3 if tx["F3912"] == 1 else 0.0
+    # FORCE SOC VARIABILITY
+    risk = np.clip(
+        risk + (0.3 if tx["F3912"] == 1 else 0.1),
+        0, 1
+    )
 
-    risk = raw_risk + shock + fraud_boost
-    risk = float(np.clip(risk, 0, 1))
-
-    action, case_status, ctr, str_flag = aml_policy(risk, tx["F115"])
+    decision = policy(risk)
 
     event = {
         "txn_id": f"T{st.session_state.tick}",
-        "risk": risk,
+        "risk": float(risk),
+        "decision": decision,
         "amount": float(tx["F115"]),
-        "action": action,
-        "case": case_status,
-        "CTR": ctr,
-        "STR": str_flag,
         "reasons": result["rationale"]
     }
 
+    # ALWAYS STORE EVENT
     st.session_state.events.insert(0, event)
+    st.session_state.events = st.session_state.events[:50]
 
-    # 🔥 FIXED HITL LOGIC (NO SILENT FILTERING)
-    if case_status in ["ESCALATED", "OPEN", "WATCHLIST"]:
+    # 🔥 CRITICAL FIX: HITL POPULATION
+    if decision in ["REVIEW", "FREEZE"]:
         st.session_state.cases.insert(0, event)
-
-    st.session_state.events = st.session_state.events[:80]
-    st.session_state.cases = st.session_state.cases[:40]
+        st.session_state.cases = st.session_state.cases[:30]
 
 # =========================================================
 # CONTROLS
 # =========================================================
-col1, col2 = st.columns(2)
+c1, c2 = st.columns(2)
 
-if col1.button("▶ START SOC STREAM"):
+if c1.button("▶ START STREAM"):
     st.session_state.running = True
 
-if col2.button("⛔ STOP SOC"):
+if c2.button("⛔ STOP"):
     st.session_state.running = False
 
 # =========================================================
-# DEBUG (IMPORTANT)
-# =========================================================
-st.write("RUNNING:", st.session_state.running)
-st.write("TICK:", st.session_state.tick)
-st.write("EVENTS:", len(st.session_state.events))
-st.write("CASES:", len(st.session_state.cases))
-
-# =========================================================
-# STREAM LOOP
+# RUN STREAM
 # =========================================================
 if st.session_state.running:
-    stream_tick()
-    time.sleep(0.6)
+    step()
+    time.sleep(0.7)
     st.rerun()
 
 # =========================================================
-# LIVE ALERT STREAM
+# LIVE ALERTS (FIXED UI BINDING)
 # =========================================================
-st.subheader("🚨 LIVE AML SOC ALERT STREAM")
+st.subheader("🚨 LIVE SOC ALERT STREAM")
 
-if st.session_state.events:
+if len(st.session_state.events) == 0:
+    st.warning("STREAM STARTING... generating AML signals")
 
-    for e in st.session_state.events[:12]:
+for e in st.session_state.events[:10]:
 
-        flags = []
-        if e["CTR"]:
-            flags.append("CTR")
-        if e["STR"]:
-            flags.append("STR")
+    if e["decision"] == "FREEZE":
+        st.error(f"🧊 FREEZE | {e['txn_id']} | Risk={e['risk']:.2f}")
 
-        flag_text = "|".join(flags) if flags else "NONE"
+    elif e["decision"] == "REVIEW":
+        st.warning(f"⚠️ REVIEW | {e['txn_id']} | Risk={e['risk']:.2f}")
 
-        if e["action"] == "FREEZE":
-            st.error(f"🧊 FREEZE | {e['txn_id']} | Risk={e['risk']:.2f} | {flag_text}")
-
-        elif e["action"] == "REFER":
-            st.warning(f"⚠️ REFER | {e['txn_id']} | Risk={e['risk']:.2f} | {flag_text}")
-
-        else:
-            st.info(f"🟡 ALERT | {e['txn_id']} | Risk={e['risk']:.2f} | {flag_text}")
-
-else:
-    st.warning("SOC STREAM ACTIVE — generating financial intelligence signals...")
+    else:
+        st.info(f"🟡 ALLOW | {e['txn_id']} | Risk={e['risk']:.2f}")
 
 # =========================================================
-# HITL QUEUE
+# HITL QUEUE (FIXED)
 # =========================================================
 st.subheader("📌 AML Investigation Queue (HITL)")
 
-if st.session_state.cases:
+if len(st.session_state.cases) == 0:
+    st.info("No cases yet — waiting for risk escalation")
+else:
     st.dataframe(pd.DataFrame(st.session_state.cases))
-else:
-    st.info("No AML cases yet — system stabilizing")
-
-# =========================================================
-# CTR / STR DASHBOARD
-# =========================================================
-st.subheader("📊 Regulatory Reporting (CTR / STR)")
-
-if st.session_state.events:
-
-    df = pd.DataFrame(st.session_state.events)
-
-    c1, c2 = st.columns(2)
-    c1.metric("CTR COUNT", int(df["CTR"].sum()))
-    c2.metric("STR COUNT", int(df["STR"].sum()))
-
-    st.bar_chart(df["action"].value_counts())
-
-else:
-    st.info("No regulatory data yet")
 
 # =========================================================
 # REASONING PANEL
 # =========================================================
 st.subheader("🧠 Latest Case Reasoning")
 
-if st.session_state.cases:
-
-    latest = st.session_state.cases[0]
-
-    for r in latest["reasons"]:
+if len(st.session_state.cases) > 0:
+    for r in st.session_state.cases[0]["reasons"]:
         st.write("•", r)
-
 else:
-    st.info("Waiting for risk signals...")
+    st.info("Waiting for suspicious activity...")
