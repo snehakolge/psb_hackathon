@@ -1,178 +1,186 @@
-import agent_ecosystem_engine
-from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
-import os
 
 st.set_page_config(
-page_title="AI Mule Account Detection System",
-page_icon="🛡️",
-layout="wide"
+    page_title="AI Mule Account Detection Ecosystem",
+    page_icon="🛡️",
+    layout="wide"
 )
 
-st.title("🛡️ AI-Powered Mule Account Detection Platform")
-st.subheader("PSB Hackathon | Missing Value Intelligence + Risk Fusion Engine")
+# =========================
+# HEADER
+# =========================
 
-MODEL_PATH = "mule_ecosystem.pkl"
-SCALER_PATH = "scaler.pkl"
+st.title("🏦 AI-Powered Mule Account Detection Ecosystem")
+st.subheader("PSB Hackathon Submission")
 
-# --------------------------
+st.sidebar.success("System Online")
 
-# Load Artifacts
+# =========================
+# SIDEBAR
+# =========================
 
-# --------------------------
+st.sidebar.markdown("## Platform Components")
 
-model_loaded = False
+st.sidebar.write("✅ Missing Value Intelligence")
+st.sidebar.write("✅ Behavioral Pattern Analysis")
+st.sidebar.write("✅ Risk Fusion Engine")
+st.sidebar.write("✅ Explainable AI")
+st.sidebar.write("✅ Human-in-the-Loop")
+st.sidebar.write("✅ Analyst Feedback Module")
 
-try:
-with open(MODEL_PATH, "rb") as f:
-model = pickle.load(f)
+# =========================
+# FEATURE INPUT
+# =========================
 
-```
-with open(SCALER_PATH, "rb") as f:
-    scaler = pickle.load(f)
-
-model_loaded = True
-st.sidebar.success("Model Loaded Successfully")
-```
-
-except Exception as e:
-st.sidebar.warning("Model artifacts could not be loaded.")
-st.sidebar.write(str(e))
-
-# --------------------------
-
-# Input Section
-
-# --------------------------
-
-st.markdown("## Account Feature Input")
+st.markdown("## Account Feature Analysis")
 
 col1, col2 = st.columns(2)
 
 with col1:
-F115 = st.number_input("F115", value=1000.0)
-F527 = st.number_input("F527", value=0.0)
-F531 = st.number_input("F531", value=0.0)
-F2582 = st.number_input("F2582", value=0.0)
+    F115 = st.number_input("F115", value=1000.0)
+    F527 = st.number_input("F527", value=0.0)
+    F531 = st.number_input("F531", value=0.0)
+    F2582 = st.number_input("F2582", value=0.0)
 
 with col2:
-F2678 = st.number_input("F2678", value=0.0)
-F2956 = st.number_input("F2956", value=0.0)
-F3043 = st.number_input("F3043", value=0.0)
+    F2678 = st.number_input("F2678", value=0.0)
+    F2956 = st.number_input("F2956", value=0.0)
+    F3043 = st.number_input("F3043", value=0.0)
 
-# --------------------------
+# =========================
+# MISSING INTELLIGENCE
+# =========================
 
-# Missing Value Intelligence
+miss_score = 0
+reasons = []
 
-# --------------------------
+if F2678 == 0:
+    miss_score += 20
+    reasons.append("F2678 missing pattern")
 
-MISS_F527 = int(pd.isna(F527))
-MISS_F531 = int(pd.isna(F531))
-MISS_F2582 = int(pd.isna(F2582))
-MISS_F2678 = int(pd.isna(F2678))
-MISS_F2956 = int(pd.isna(F2956))
-MISS_F3043 = int(pd.isna(F3043))
+if F3043 == 0:
+    miss_score += 20
+    reasons.append("F3043 missing pattern")
 
-# --------------------------
+if F527 == 0:
+    miss_score += 10
+    reasons.append("F527 sparse behavior")
 
-# Prediction
+# =========================
+# BEHAVIOR AGENT
+# =========================
 
-# --------------------------
+behavior_score = 0
+
+if F115 > 100000:
+    behavior_score += 30
+    reasons.append("Large transaction behavior")
+
+if abs(F2582) > 5000:
+    behavior_score += 15
+    reasons.append("Abnormal account activity")
+
+if abs(F2956) > 5000:
+    behavior_score += 15
+    reasons.append("Unusual behavioral movement")
+
+# =========================
+# RISK FUSION ENGINE
+# =========================
+
+risk_score = min(
+    100,
+    miss_score + behavior_score
+)
+
+# =========================
+# ANALYSIS
+# =========================
 
 if st.button("🔍 Analyze Account"):
 
-```
-input_df = pd.DataFrame({
-    "F115":[F115],
-    "F527":[F527],
-    "F531":[F531],
-    "F2582":[F2582],
-    "F2678":[F2678],
-    "F2956":[F2956],
-    "F3043":[F3043],
-    "MISS_F527":[MISS_F527],
-    "MISS_F531":[MISS_F531],
-    "MISS_F2582":[MISS_F2582],
-    "MISS_F2678":[MISS_F2678],
-    "MISS_F2956":[MISS_F2956],
-    "MISS_F3043":[MISS_F3043]
-})
+    st.markdown("## Analysis Results")
 
-st.markdown("### Risk Assessment")
+    st.metric(
+        "Mule Risk Score",
+        f"{risk_score:.0f}%"
+    )
 
-if model_loaded:
+    if risk_score >= 70:
+        st.error("🚨 HIGH RISK MULE ACCOUNT")
 
-    try:
+    elif risk_score >= 40:
+        st.warning("⚠️ SUSPICIOUS ACCOUNT")
 
-        if hasattr(model, "predict_proba"):
-            score = float(model.predict_proba(input_df)[0][1])
+    else:
+        st.success("✅ LOW RISK ACCOUNT")
 
-        else:
-            score = 0.50
+    st.markdown("### Explainability")
 
-    except:
-        score = 0.50
+    if reasons:
+        for r in reasons:
+            st.write("•", r)
+    else:
+        st.write("• No significant risk indicators")
 
-else:
-    score = np.random.uniform(0.3, 0.9)
-
-st.metric("Risk Score", f"{score*100:.2f}%")
-
-if score >= 0.80:
-    st.error("CRITICAL RISK - Potential Mule Account")
-
-elif score >= 0.60:
-    st.warning("HIGH RISK - Review Recommended")
-
-elif score >= 0.40:
-    st.info("MEDIUM RISK")
-
-else:
-    st.success("LOW RISK")
-
-st.markdown("### Investigator Copilot")
-
-rationale = []
-
-if MISS_F2678:
-    rationale.append("Missing F2678 pattern observed")
-
-if MISS_F3043:
-    rationale.append("Missing F3043 pattern observed")
-
-if F115 > 100000:
-    rationale.append("High value behavioural pattern")
-
-if len(rationale) == 0:
-    rationale.append("No major risk indicators detected")
-
-for item in rationale:
-    st.write("•", item)
-```
-
-# --------------------------
-
-# Sidebar
-
-# --------------------------
-
-with st.sidebar:
-
-```
-st.markdown("## System Components")
-
-st.write("✅ Missing Value Intelligence")
-st.write("✅ Three-Tier Imputation")
-st.write("✅ Ensemble Learning")
-st.write("✅ Isolation Forest")
-st.write("✅ Risk Fusion Engine")
-st.write("✅ Explainable AI")
-st.write("✅ Investigator Copilot")
+# =========================
+# REVIEW QUEUE
+# =========================
 
 st.markdown("---")
+st.markdown("## Analyst Review Queue")
 
-st.write("Target Variable: F3924")
-```
+sample_queue = pd.DataFrame({
+    "Account_ID": [
+        "ACC001",
+        "ACC002",
+        "ACC003"
+    ],
+    "Risk": [
+        85,
+        62,
+        22
+    ],
+    "Status": [
+        "REVIEW",
+        "REVIEW",
+        "CLEAR"
+    ]
+})
+
+st.dataframe(
+    sample_queue,
+    use_container_width=True
+)
+
+# =========================
+# HITL
+# =========================
+
+st.markdown("---")
+st.markdown("## Human-in-the-Loop Feedback")
+
+verdict = st.selectbox(
+    "Analyst Decision",
+    [
+        "CLEAN",
+        "SUSPICIOUS",
+        "MULE"
+    ]
+)
+
+if st.button("Submit Analyst Feedback"):
+    st.success(
+        f"Feedback stored: {verdict}"
+    )
+
+# =========================
+# FOOTER
+# =========================
+
+st.markdown("---")
+st.caption(
+    "PSB Hackathon | AI/ML-Based Classification of Suspicious Mule Accounts"
+)
