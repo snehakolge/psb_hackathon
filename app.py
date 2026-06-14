@@ -3,43 +3,53 @@ import numpy as np
 import pandas as pd
 import time
 
-st.set_page_config(page_title="AML SOC", layout="wide")
-st.title("🏦 RBI AML + Fraud SOC (Stable Streaming Engine)")
+# =========================================================
+# PAGE CONFIG
+# =========================================================
+st.set_page_config(page_title="RBI AML SOC", layout="wide")
+st.title("🏦 RBI AML + Fraud SOC (Stable Real-Time Streaming)")
 
-# =========================
-# STATE
-# =========================
-if "running" not in st.session_state:
+# =========================================================
+# STATE INIT (CRITICAL FIX)
+# =========================================================
+if "initialized" not in st.session_state:
+    st.session_state.initialized = True
     st.session_state.running = False
-
-if "tick" not in st.session_state:
     st.session_state.tick = 0
-
-if "events" not in st.session_state:
     st.session_state.events = []
-
-if "cases" not in st.session_state:
     st.session_state.cases = []
 
-# =========================
-# GENERATOR (FORCED ACTIVITY)
-# =========================
+# =========================================================
+# START / STOP CONTROL
+# =========================================================
+col1, col2 = st.columns(2)
+
+if col1.button("▶ START STREAM"):
+    st.session_state.running = True
+
+if col2.button("⛔ STOP STREAM"):
+    st.session_state.running = False
+
+# =========================================================
+# TRANSACTION GENERATOR (FORCED ACTIVITY)
+# =========================================================
 def generate_tx():
-    fraud = np.random.rand() < 0.7
+
+    fraud = np.random.rand() < 0.6  # ensure active stream
 
     tx = {
-        "amount": np.random.normal(50000, 20000),
-        "risk_signal": fraud
+        "amount": np.random.normal(90000, 40000),
+        "fraud_signal": fraud
     }
 
     if fraud:
-        tx["amount"] = np.random.normal(150000, 50000)
+        tx["amount"] = np.random.normal(180000, 60000)
 
     return tx
 
-# =========================
-# SIMPLE RISK ENGINE (NO ML DEPENDENCY ISSUE)
-# =========================
+# =========================================================
+# RISK ENGINE (ML SUBSTITUTE - STABLE)
+# =========================================================
 def risk_engine(tx):
 
     risk = 0.2
@@ -47,15 +57,15 @@ def risk_engine(tx):
     if tx["amount"] > 100000:
         risk += 0.4
 
-    if tx["risk_signal"]:
+    if tx["fraud_signal"]:
         risk += 0.4
 
-    return min(risk, 1.0)
+    return float(np.clip(risk, 0, 1))
 
-# =========================
-# DECISION ENGINE (RBI STYLE)
-# =========================
-def decision(risk):
+# =========================================================
+# RBI POLICY ENGINE
+# =========================================================
+def decision_engine(risk):
 
     if risk > 0.7:
         return "FREEZE"
@@ -64,58 +74,49 @@ def decision(risk):
     else:
         return "ALLOW"
 
-# =========================
-# STEP ENGINE (CRITICAL FIX)
-# =========================
+# =========================================================
+# STREAM STEP (CORE FIX)
+# =========================================================
 def step():
 
     st.session_state.tick += 1
 
     tx = generate_tx()
     risk = risk_engine(tx)
-    action = decision(risk)
+    decision = decision_engine(risk)
 
     event = {
         "tick": st.session_state.tick,
         "amount": float(tx["amount"]),
         "risk": float(risk),
-        "decision": action
+        "decision": decision
     }
 
+    # STORE EVENTS (NEVER EMPTY)
     st.session_state.events.insert(0, event)
+    st.session_state.events = st.session_state.events[:50]
 
-    if action in ["REVIEW", "FREEZE"]:
+    # HITL QUEUE (FIXED LOGIC)
+    if decision in ["REVIEW", "FREEZE"]:
         st.session_state.cases.insert(0, event)
+        st.session_state.cases = st.session_state.cases[:30]
 
-    st.session_state.events = st.session_state.events[:30]
-    st.session_state.cases = st.session_state.cases[:20]
-
-# =========================
-# CONTROLS
-# =========================
-col1, col2 = st.columns(2)
-
-if col1.button("▶ START STREAM"):
-    st.session_state.running = True
-
-if col2.button("⛔ STOP"):
-    st.session_state.running = False
-
-# =========================
-# IMPORTANT FIX: RUN STEP BEFORE RERUN
-# =========================
+# =========================================================
+# STREAM LOOP (IMPORTANT FIX)
+# =========================================================
 if st.session_state.running:
+
     step()
-    time.sleep(0.8)
+    time.sleep(0.6)
     st.rerun()
 
-# =========================
-# UI DISPLAY (ALWAYS RENDERS)
-# =========================
+# =========================================================
+# LIVE SOC STREAM
+# =========================================================
 st.subheader("🚨 LIVE SOC ALERT STREAM")
 
 if len(st.session_state.events) == 0:
-    st.warning("STREAM ACTIVE → generating AML events...")
+    st.warning("STREAM ACTIVE → generating AML signals...")
 
 for e in st.session_state.events[:10]:
 
@@ -128,9 +129,9 @@ for e in st.session_state.events[:10]:
     else:
         st.info(f"🟢 ALLOW | Tick {e['tick']} | Risk={e['risk']:.2f}")
 
-# =========================
+# =========================================================
 # HITL QUEUE
-# =========================
+# =========================================================
 st.subheader("📌 AML Investigation Queue (HITL)")
 
 if len(st.session_state.cases) > 0:
@@ -138,9 +139,23 @@ if len(st.session_state.cases) > 0:
 else:
     st.info("No AML cases yet — waiting for escalation")
 
-# =========================
-# DEBUG (VERY IMPORTANT)
-# =========================
+# =========================================================
+# CTR / STR METRICS (FIXED + ALWAYS VISIBLE)
+# =========================================================
+st.subheader("📊 Regulatory Reporting (CTR / STR)")
+
+ctr = sum(1 for e in st.session_state.events if e["amount"] > 200000)
+str_count = len(st.session_state.cases)
+
+c1, c2 = st.columns(2)
+c1.metric("CTR COUNT", ctr)
+c2.metric("STR COUNT", str_count)
+
+# =========================================================
+# DEBUG PANEL (IMPORTANT FOR HACKATHON)
+# =========================================================
+st.subheader("🧠 System Status")
+
 st.write("RUNNING:", st.session_state.running)
 st.write("TICK:", st.session_state.tick)
 st.write("EVENTS:", len(st.session_state.events))
