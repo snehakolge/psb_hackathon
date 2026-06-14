@@ -1,3 +1,5 @@
+import agent_ecosystem_engine
+from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 import streamlit as st
 import pandas as pd
 import numpy as np
