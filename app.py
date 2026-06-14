@@ -12,7 +12,7 @@ FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
 
 st.set_page_config(page_title="RBI AML SOC", layout="wide")
 
-st.title("🏦 RBI AML + Fraud SOC (Stress-Tested ML Streaming System)")
+st.title("🏦 RBI AML + Fraud SOC (Guaranteed Alert Stream System)")
 
 # =========================================================
 # STATE INIT
@@ -39,53 +39,53 @@ def load_ecosystem():
 ecosystem = load_ecosystem()
 
 # =========================================================
-# TRANSACTION GENERATOR (FORCED FRAUD MIX)
+# TRANSACTION GENERATOR
 # =========================================================
 def generate_transaction(tick):
 
-    fraud = np.random.rand() < 0.45  # high enough for visible SOC
+    fraud = np.random.rand() < 0.5  # HIGH SIGNAL FOR DEMO
 
     if fraud:
         return {
-            "F115": np.random.normal(200000, 70000),
-            "F527": np.random.normal(3000, 900),
+            "F115": np.random.normal(220000, 80000),
+            "F527": np.random.normal(3500, 1000),
             "F531": np.nan,
             "F2582": np.nan,
-            "F2678": np.random.normal(10000, 3000),
-            "F2956": np.random.normal(8000, 2000),
-            "F3043": np.random.normal(6000, 1500),
+            "F2678": np.random.normal(11000, 3000),
+            "F2956": np.random.normal(9000, 2500),
+            "F3043": np.random.normal(7000, 2000),
             "F3912": 1
         }
 
     return {
-        "F115": np.random.normal(35000, 15000),
-        "F527": np.random.normal(120, 60),
-        "F531": np.random.normal(90, 40),
-        "F2582": np.random.normal(300, 120),
-        "F2678": np.random.normal(450, 180),
-        "F2956": np.random.normal(260, 100),
-        "F3043": np.random.normal(180, 80),
-        "F3912": np.random.choice([0, 1], p=[0.90, 0.10])
+        "F115": np.random.normal(40000, 18000),
+        "F527": np.random.normal(140, 70),
+        "F531": np.random.normal(100, 40),
+        "F2582": np.random.normal(320, 130),
+        "F2678": np.random.normal(500, 200),
+        "F2956": np.random.normal(280, 110),
+        "F3043": np.random.normal(200, 90),
+        "F3912": np.random.choice([0, 1], p=[0.85, 0.15])
     }
 
 # =========================================================
-# AML POLICY ENGINE (FORCED SOC ACTIVITY)
+# AML POLICY ENGINE (NO SILENT MODE)
 # =========================================================
 def aml_policy(risk, amount):
 
     ctr = amount > 500000
 
-    # 🔥 FORCE ALERT DENSITY (KEY FIX)
-    if risk > 0.60:
+    # 🔥 FORCE SOC ACTIVITY ALWAYS
+    if risk > 0.50:
         return "FREEZE", "ESCALATED", ctr, True
 
-    if risk > 0.35:
+    if risk > 0.25:
         return "REFER", "OPEN", ctr, True
 
-    return "ALLOW", "MONITOR", ctr, False
+    return "ALERT", "WATCHLIST", ctr, False
 
 # =========================================================
-# STREAM ENGINE (CORE FIX)
+# STREAM ENGINE (CRITICAL FIX)
 # =========================================================
 def stream_tick():
 
@@ -97,11 +97,11 @@ def stream_tick():
 
     raw_risk = float(result["risk_score"])
 
-    # 🔥 SOC STRESS AMPLIFIER (CRITICAL FIX)
-    amplifier = np.random.choice([0.2, 0.35, 0.5, 0.8, 0.95],
-                                 p=[0.2, 0.25, 0.25, 0.2, 0.1])
+    # 🔥 SOC ESCALATION LAYER (FOR GUARANTEED OUTPUT)
+    shock = 0.25 if tx["F115"] > 80000 else 0.1
+    fraud_boost = 0.3 if tx["F3912"] == 1 else 0.0
 
-    risk = raw_risk + amplifier
+    risk = raw_risk + shock + fraud_boost
     risk = float(np.clip(risk, 0, 1))
 
     action, case_status, ctr, str_flag = aml_policy(risk, tx["F115"])
@@ -119,11 +119,12 @@ def stream_tick():
 
     st.session_state.events.insert(0, event)
 
-    if case_status != "MONITOR":
+    # 🔥 FIXED HITL LOGIC (NO SILENT FILTERING)
+    if case_status in ["ESCALATED", "OPEN", "WATCHLIST"]:
         st.session_state.cases.insert(0, event)
 
-    st.session_state.events = st.session_state.events[:60]
-    st.session_state.cases = st.session_state.cases[:30]
+    st.session_state.events = st.session_state.events[:80]
+    st.session_state.cases = st.session_state.cases[:40]
 
 # =========================================================
 # CONTROLS
@@ -137,7 +138,7 @@ if col2.button("⛔ STOP SOC"):
     st.session_state.running = False
 
 # =========================================================
-# DEBUG PANEL (IMPORTANT)
+# DEBUG (IMPORTANT)
 # =========================================================
 st.write("RUNNING:", st.session_state.running)
 st.write("TICK:", st.session_state.tick)
@@ -149,7 +150,7 @@ st.write("CASES:", len(st.session_state.cases))
 # =========================================================
 if st.session_state.running:
     stream_tick()
-    time.sleep(0.7)
+    time.sleep(0.6)
     st.rerun()
 
 # =========================================================
@@ -176,23 +177,23 @@ if st.session_state.events:
             st.warning(f"⚠️ REFER | {e['txn_id']} | Risk={e['risk']:.2f} | {flag_text}")
 
         else:
-            st.success(f"🟢 ALLOW | {e['txn_id']} | Risk={e['risk']:.2f}")
+            st.info(f"🟡 ALERT | {e['txn_id']} | Risk={e['risk']:.2f} | {flag_text}")
 
 else:
-    st.info("SOC ACTIVE → streaming transactions...")
+    st.warning("SOC STREAM ACTIVE — generating financial intelligence signals...")
 
 # =========================================================
-# AML CASE QUEUE
+# HITL QUEUE
 # =========================================================
 st.subheader("📌 AML Investigation Queue (HITL)")
 
 if st.session_state.cases:
     st.dataframe(pd.DataFrame(st.session_state.cases))
 else:
-    st.info("No AML cases yet (system warming up)")
+    st.info("No AML cases yet — system stabilizing")
 
 # =========================================================
-# CTR / STR REPORTING
+# CTR / STR DASHBOARD
 # =========================================================
 st.subheader("📊 Regulatory Reporting (CTR / STR)")
 
@@ -207,7 +208,7 @@ if st.session_state.events:
     st.bar_chart(df["action"].value_counts())
 
 else:
-    st.info("No regulatory activity yet")
+    st.info("No regulatory data yet")
 
 # =========================================================
 # REASONING PANEL
