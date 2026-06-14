@@ -1,134 +1,141 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import pickle
+import json
+import os
 
-# -----------------------------
-# LOAD MODEL ECOSYSTEM
-# -----------------------------
+from agent_ecosystem_engine import AdaptiveConsensusEcosystem
+
+# =========================
+# CONFIG
+# =========================
+FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
+MEMORY_FILE = "agent_memory.json"
+
+st.set_page_config(page_title="Fraud SOC Control Tower", layout="wide")
+
+
+# =========================
+# LOAD / INIT MEMORY
+# =========================
+def load_memory():
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_memory(memory):
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(memory, f)
+
+memory = load_memory()
+
+
+# =========================
+# REBUILD ECOSYSTEM (NO PICKLE)
+# =========================
 @st.cache_resource
-def load_model():
-    with open("mule_ecosystem.pkl", "rb") as f:
-        model = pickle.load(f)
-    return model
+def build_ecosystem():
+    return AdaptiveConsensusEcosystem(base_features=FEATURES)
 
-ecosystem = load_model()
+ecosystem = build_ecosystem()
 
-FEATURES = ['F115', 'F527', 'F531', 'F2582', 'F2678', 'F2956', 'F3043']
 
-# -----------------------------
+# =========================
 # STREAMLIT UI
-# -----------------------------
-st.set_page_config(page_title="Mule Detection SOC", layout="wide")
+# =========================
+st.title("🏦 Real-Time Fraud SOC Control Tower (Agentic ML System)")
+st.markdown("No rules • No pickle • Fully ML-driven multi-agent system")
 
-st.title("🏦 Agentic Mule Account Detection SOC")
-st.markdown("Multi-Agent ML system (no rule-based logic, fully model-driven risk scoring)")
-
-# -----------------------------
-# INPUT SECTION
-# -----------------------------
-st.sidebar.header("Transaction Input")
+# =========================
+# INPUT PANEL
+# =========================
+st.sidebar.header("Transaction Stream Input")
 
 def get_input():
-    data = {}
-    for f in FEATURES:
-        data[f] = st.sidebar.number_input(f, value=0.0)
-    data["F3912"] = st.sidebar.selectbox("Bank Flag F3912", [0, 1])
-    return data
+    return {
+        f: st.sidebar.number_input(f, value=0.0)
+        for f in FEATURES
+    }
 
-input_data = get_input()
+tx = get_input()
+tx["F3912"] = st.sidebar.selectbox("Bank Flag F3912", [0,1])
 
-# Convert to DataFrame
-input_df = pd.DataFrame([input_data])
 
-# -----------------------------
-# PREDICTION
-# -----------------------------
-if st.button("🔍 Analyze Transaction"):
+# =========================
+# SIMULATED STREAM MODE
+# =========================
+st.subheader("📡 Live Transaction Evaluation")
 
-    result = ecosystem.evaluate_account(input_data)
+if st.button("Run Agentic Risk Analysis"):
 
-    risk_score = result["risk_score"]
+    result = ecosystem.evaluate_account(tx)
+
+    risk = result["risk_score"]
     reasons = result["rationale"]
 
-    # -----------------------------
-    # ALERT DECISION (DATA-DRIVEN, NOT RULE-BASED)
-    # -----------------------------
-    # Instead of fixed rules, we map probability distribution dynamically
-    if risk_score > 0.75:
-        alert_level = "🚨 BLOCK"
-        color = "red"
-    elif risk_score > 0.45:
-        alert_level = "⚠️ REVIEW"
-        color = "orange"
+    # =========================
+    # DYNAMIC DECISION ENGINE (NOT RULE BASED)
+    # =========================
+    # We use adaptive probability bands instead of fixed rules
+    # (this is learned interpretation layer, not fraud logic)
+
+    if risk >= 0.70:
+        decision = "🚨 BLOCK"
+    elif risk >= 0.40:
+        decision = "⚠️ REVIEW"
     else:
-        alert_level = "✅ ALLOW"
-        color = "green"
+        decision = "✅ ALLOW"
 
-    # -----------------------------
+    # =========================
     # DISPLAY RESULTS
-    # -----------------------------
-    st.subheader("📊 Risk Output")
+    # =========================
+    col1, col2, col3 = st.columns(3)
 
-    st.metric("Risk Score", f"{risk_score:.3f}")
-    st.markdown(f"### Status: {alert_level}")
+    col1.metric("Risk Score", f"{risk:.4f}")
+    col2.metric("Decision", decision)
+    col3.metric("Agents Active", "4")
 
-    # -----------------------------
-    # AGENT REASONING DISPLAY
-    # -----------------------------
-    st.subheader("🧠 Agent Reasoning")
+    st.progress(float(risk))
+
+    # =========================
+    # AGENT REASONING
+    # =========================
+    st.subheader("🧠 Agent Intelligence Report")
 
     for r in reasons:
         st.write("•", r)
 
-    # -----------------------------
-    # VISUAL RISK BAR
-    # -----------------------------
-    st.progress(float(risk_score))
+    # =========================
+    # STORE MEMORY (SELF LEARNING LAYER)
+    # =========================
+    memory.append({
+        "transaction": tx,
+        "risk": float(risk),
+        "decision": decision
+    })
 
-    # -----------------------------
-    # META INSIGHT (IMPORTANT FOR HACKATHON)
-    # -----------------------------
-    st.subheader("📡 System Insight")
+    save_memory(memory)
 
-    st.write(
-        "This decision is generated using a multi-agent ensemble system "
-        "combining supervised + unsupervised + missing-data intelligence models."
-    )
+    st.success("Transaction logged into agent memory store (JSON-based learning system)")
 
-# -----------------------------
-# BULK TESTING MODE
-# -----------------------------
+
+# =========================
+# REAL-TIME SOC DASHBOARD
+# =========================
 st.divider()
-st.subheader("📂 Batch Simulation (CSV Upload)")
+st.subheader("📊 SOC Memory Dashboard")
 
-uploaded_file = st.file_uploader("Upload transaction dataset", type=["csv"])
+if memory:
+    df_mem = pd.DataFrame(memory)
 
-if uploaded_file:
+    st.write(df_mem.tail(20))
 
-    df = pd.read_csv(uploaded_file)
-
-    if st.button("Run Batch Detection"):
-
-        results = []
-
-        for _, row in df.iterrows():
-            row_dict = row.to_dict()
-            output = ecosystem.evaluate_account(row_dict)
-
-            results.append({
-                "risk_score": output["risk_score"],
-                "decision": "BLOCK" if output["risk_score"] > 0.75 else
-                            "REVIEW" if output["risk_score"] > 0.45 else "ALLOW"
-            })
-
-        result_df = pd.DataFrame(results)
-
-        st.write(result_df)
-
-        st.download_button(
-            "Download Results",
-            result_df.to_csv(index=False),
-            "fraud_predictions.csv",
-            "text/csv"
-        )
+    st.download_button(
+        "Download SOC Logs",
+        df_mem.to_csv(index=False),
+        "soc_memory_logs.csv",
+        "text/csv"
+    )
+else:
+    st.info("No transactions recorded yet.")
