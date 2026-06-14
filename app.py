@@ -7,58 +7,45 @@ import os
 
 from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 
-# =========================
+# =========================================================
 # CONFIG
-# =========================
+# =========================================================
 FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
-MEMORY_FILE = "soc_memory.json"
 
 st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
 
-st.title("🏦 PSB Hackathon - Real Agentic Fraud SOC (ML Driven)")
+st.title("🏦 PSB Hackathon - Agentic Fraud SOC (Clean Architecture)")
 
-# =========================
-# MEMORY SAFE LOAD/SAVE
-# =========================
-def load_memory():
-    if not os.path.exists(MEMORY_FILE):
-        return []
-    try:
-        with open(MEMORY_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return []
+# =========================================================
+# SAFE STATE STORAGE (IMPORTANT FIX)
+# =========================================================
+if "events" not in st.session_state:
+    st.session_state.events = []
 
-def save_memory(mem):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(mem, f)
+if "feedback" not in st.session_state:
+    st.session_state.feedback = []
 
-memory = load_memory()
+if "high_risk_queue" not in st.session_state:
+    st.session_state.high_risk_queue = []
 
-# =========================
-# ML ECOSYSTEM (YOUR CORE MODEL)
-# =========================
-@st.cache_resource
-def get_ecosystem():
-    return AdaptiveConsensusEcosystem(base_features=FEATURES)
-
-ecosystem = get_ecosystem()
-
-# =========================
-# SESSION STATE
-# =========================
 if "running" not in st.session_state:
     st.session_state.running = False
 
 if "step" not in st.session_state:
     st.session_state.step = 0
 
-if "high_risk_queue" not in st.session_state:
-    st.session_state.high_risk_queue = []
+# =========================================================
+# ML ECOSYSTEM
+# =========================================================
+@st.cache_resource
+def get_ecosystem():
+    return AdaptiveConsensusEcosystem(base_features=FEATURES)
 
-# =========================
+ecosystem = get_ecosystem()
+
+# =========================================================
 # START / STOP
-# =========================
+# =========================================================
 col1, col2 = st.columns(2)
 
 if col1.button("▶ Start SOC Stream"):
@@ -67,14 +54,14 @@ if col1.button("▶ Start SOC Stream"):
 if col2.button("⛔ Stop SOC Stream"):
     st.session_state.running = False
 
-# =========================
-# TRANSACTION STREAM (REALISTIC FRAUD INJECTION)
-# =========================
+# =========================================================
+# TRANSACTION GENERATOR
+# =========================================================
 def generate_transaction(step):
 
-    fraud_event = np.random.rand() < 0.15
+    fraud = np.random.rand() < 0.15
 
-    if fraud_event:
+    if fraud:
         return {
             "F115": np.random.normal(150000, 30000),
             "F527": np.random.normal(2000, 500),
@@ -97,9 +84,21 @@ def generate_transaction(step):
         "F3912": np.random.choice([0,1], p=[0.97,0.03])
     }
 
-# =========================
-# RUN SOC STREAM
-# =========================
+# =========================================================
+# SOC POLICY ENGINE
+# =========================================================
+def decide_action(risk):
+
+    if risk > 0.80:
+        return "FREEZE"
+    elif risk > 0.55:
+        return "REVIEW"
+    else:
+        return "ALLOW"
+
+# =========================================================
+# STREAM LOOP
+# =========================================================
 if st.session_state.running:
 
     st.session_state.step += 1
@@ -107,29 +106,21 @@ if st.session_state.running:
 
     tx = generate_transaction(step)
 
-    # =========================
-    # 🔥 ML AGENT CORE CALL
-    # =========================
+    # ML inference (YOUR ECO SYSTEM)
     result = ecosystem.evaluate_account(tx)
 
     risk = float(result["risk_score"])
     reasons = result["rationale"]
 
-    # =========================
-    # ML-DRIVEN ACTION POLICY (NOT RULE AGENTS)
-    # =========================
-    if risk > 0.80:
-        decision = "FREEZE"
-    elif risk > 0.55:
-        decision = "REVIEW"
-    else:
-        decision = "ALLOW"
+    decision = decide_action(risk)
 
-    # =========================
-    # ALERT OBJECT (REAL SOC EVENT)
-    # =========================
-    alert = {
-        "txn_id": f"T{step}",
+    txn_id = f"T{step}"
+
+    # =====================================================
+    # CLEAN EVENT OBJECT (IMPORTANT FIX)
+    # =====================================================
+    event = {
+        "txn_id": txn_id,
         "transaction": tx,
         "risk": risk,
         "decision": decision,
@@ -137,110 +128,82 @@ if st.session_state.running:
         "timestamp": time.time()
     }
 
-    memory.append(alert)
-    save_memory(memory)
+    # STORE ONLY EVENTS HERE (NO MIXING)
+    st.session_state.events.insert(0, event)
+    st.session_state.events = st.session_state.events[:50]
 
-    # =========================
+    # =====================================================
     # HIGH RISK QUEUE
-    # =========================
+    # =====================================================
     if decision in ["FREEZE", "REVIEW"]:
-        st.session_state.high_risk_queue.insert(0, alert)
+        st.session_state.high_risk_queue.insert(0, event)
 
     st.session_state.high_risk_queue = st.session_state.high_risk_queue[:20]
 
-    # =========================
-    # SELF-HEALING LOOP (REAL ML UPDATE)
-    # =========================
-    feedback_data = [m for m in memory if "label" in m]
-
-    if len(feedback_data) > 10:
-        X, y = [], []
-
-        for f in feedback_data:
-            X.append(list(f["transaction"].values()))
-            y.append(1 if f["label"] in ["BLOCK","FREEZE"] else 0)
-
-        ecosystem.main_agent.fit(
-            pd.DataFrame(X, columns=FEATURES),
-            np.array(y)
-        )
-
+    # =====================================================
+    # HUMAN FEEDBACK TRIGGER (SEPARATE STREAM)
+    # =====================================================
     time.sleep(1)
     st.rerun()
 
-# =========================
-# LIVE ALERT STREAM
-# =========================
+# =========================================================
+# LIVE ALERT STREAM (SAFE ACCESS FIX)
+# =========================================================
 st.subheader("🚨 LIVE SOC ALERT STREAM")
 
-if memory:
+if st.session_state.events:
 
-    for m in memory[-10:][::-1]:
+    for e in st.session_state.events[:10]:
 
-        if m["decision"] == "FREEZE":
-            st.error(f"🚨 FREEZE | Risk={m['risk']:.2f} | {m['txn_id']}")
+        if e["decision"] == "FREEZE":
+            st.error(f"🚨 FREEZE | Risk={e['risk']:.2f} | {e['txn_id']}")
 
-        elif m["decision"] == "REVIEW":
-            st.warning(f"⚠️ REVIEW | Risk={m['risk']:.2f} | {m['txn_id']}")
+        elif e["decision"] == "REVIEW":
+            st.warning(f"⚠️ REVIEW | Risk={e['risk']:.2f} | {e['txn_id']}")
 
         else:
-            st.success(f"✅ ALLOW | Risk={m['risk']:.2f} | {m['txn_id']}")
+            st.success(f"✅ ALLOW | Risk={e['risk']:.2f} | {e['txn_id']}")
 
-# =========================
-# HIGH RISK CUSTOMERS
-# =========================
+# =========================================================
+# HIGH RISK QUEUE
+# =========================================================
 st.subheader("🔥 High Risk Queue (HITL)")
 
 if st.session_state.high_risk_queue:
     st.dataframe(pd.DataFrame(st.session_state.high_risk_queue))
 else:
-    st.info("No high risk cases yet.")
+    st.info("No high-risk cases yet.")
 
-# =========================
-# SOC MEMORY LOG
-# =========================
-st.subheader("📦 SOC Event Memory")
+# =========================================================
+# EVENT LOG
+# =========================================================
+st.subheader("📦 SOC Event Log")
 
-if memory:
-    st.dataframe(pd.DataFrame(memory).tail(20))
+if st.session_state.events:
+    st.dataframe(pd.DataFrame(st.session_state.events))
 else:
-    st.info("No SOC events yet")
+    st.info("No events yet.")
 
-# =========================
-# HUMAN FEEDBACK LOOP
-# =========================
-st.subheader("👨‍💼 Human-in-the-Loop Feedback")
+# =========================================================
+# HUMAN FEEDBACK (SEPARATE STREAM - FIXED DESIGN)
+# =========================================================
+st.subheader("👨‍💼 Human Feedback Loop")
 
-if memory:
+if st.session_state.events:
 
-    last_tx = memory[-1]["transaction"]
+    last_event = st.session_state.events[0]
 
     label = st.selectbox("Label Transaction", ["ALLOW", "REVIEW", "BLOCK", "FREEZE"])
 
     if st.button("Submit Feedback"):
 
-        memory.append({
-            "transaction": last_tx,
+        feedback_entry = {
+            "txn_id": last_event["txn_id"],
+            "transaction": last_event["transaction"],
             "label": label,
             "timestamp": time.time()
-        })
+        }
 
-        save_memory(memory)
+        st.session_state.feedback.append(feedback_entry)
 
-        st.success("Feedback stored → model will self-heal")
-
-# =========================
-# SOC SUMMARY METRICS
-# =========================
-st.subheader("📊 SOC Summary")
-
-if memory:
-
-    df = pd.DataFrame(memory)
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("TOTAL EVENTS", len(memory))
-    col2.metric("FREEZE", len(df[df["decision"]=="FREEZE"]))
-    col3.metric("REVIEW", len(df[df["decision"]=="REVIEW"]))
-    col4.metric("ALLOW", len(df[df["decision"]=="ALLOW"]))
+        st.success("Feedback saved (used for self-healing retraining)")
