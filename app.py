@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import json
 import os
+import time
 
 from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 
@@ -10,13 +11,14 @@ from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 # CONFIG
 # =========================
 FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
-MEMORY_FILE = "agent_memory.json"
+MEMORY_FILE = "soc_memory.json"
 
-st.set_page_config(page_title="Fraud SOC Control Tower", layout="wide")
+st.set_page_config(page_title="Autonomous Fraud SOC", layout="wide")
 
+st.title("🏦 Autonomous Agentic Fraud SOC Control Tower")
 
 # =========================
-# LOAD / INIT MEMORY
+# MEMORY SYSTEM (SELF-HEALING CORE)
 # =========================
 def load_memory():
     if os.path.exists(MEMORY_FILE):
@@ -24,118 +26,129 @@ def load_memory():
             return json.load(f)
     return []
 
-def save_memory(memory):
+def save_memory(mem):
     with open(MEMORY_FILE, "w") as f:
-        json.dump(memory, f)
+        json.dump(mem, f)
 
 memory = load_memory()
 
-
 # =========================
-# REBUILD ECOSYSTEM (NO PICKLE)
+# ECOSYSTEM (NO PICKLE)
 # =========================
 @st.cache_resource
-def build_ecosystem():
+def get_system():
     return AdaptiveConsensusEcosystem(base_features=FEATURES)
 
-ecosystem = build_ecosystem()
-
-
-# =========================
-# STREAMLIT UI
-# =========================
-st.title("🏦 Real-Time Fraud SOC Control Tower (Agentic ML System)")
-st.markdown("No rules • No pickle • Fully ML-driven multi-agent system")
+ecosystem = get_system()
 
 # =========================
-# INPUT PANEL
+# INPUT PANEL (LIVE STREAM SIMULATION)
 # =========================
-st.sidebar.header("Transaction Stream Input")
+st.sidebar.header("Live Transaction Stream")
 
-def get_input():
-    return {
-        f: st.sidebar.number_input(f, value=0.0)
-        for f in FEATURES
-    }
-
-tx = get_input()
-tx["F3912"] = st.sidebar.selectbox("Bank Flag F3912", [0,1])
-
+tx = {f: st.sidebar.number_input(f, value=0.0) for f in FEATURES}
+tx["F3912"] = st.sidebar.selectbox("Bank Flag F3912", [0, 1])
 
 # =========================
-# SIMULATED STREAM MODE
+# AUTO EXECUTION ENGINE
 # =========================
-st.subheader("📡 Live Transaction Evaluation")
+def run_agents(transaction):
 
-if st.button("Run Agentic Risk Analysis"):
-
-    result = ecosystem.evaluate_account(tx)
+    result = ecosystem.evaluate_account(transaction)
 
     risk = result["risk_score"]
     reasons = result["rationale"]
 
     # =========================
-    # DYNAMIC DECISION ENGINE (NOT RULE BASED)
+    # AUTO CLASSIFICATION (ML-BASED INTERPRETATION)
     # =========================
-    # We use adaptive probability bands instead of fixed rules
-    # (this is learned interpretation layer, not fraud logic)
-
-    if risk >= 0.70:
-        decision = "🚨 BLOCK"
-    elif risk >= 0.40:
-        decision = "⚠️ REVIEW"
+    if risk >= 0.75:
+        label = "BLOCK"
+        severity = "HIGH"
+    elif risk >= 0.45:
+        label = "REVIEW"
+        severity = "MEDIUM"
     else:
-        decision = "✅ ALLOW"
+        label = "ALLOW"
+        severity = "LOW"
 
-    # =========================
-    # DISPLAY RESULTS
-    # =========================
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("Risk Score", f"{risk:.4f}")
-    col2.metric("Decision", decision)
-    col3.metric("Agents Active", "4")
-
-    st.progress(float(risk))
-
-    # =========================
-    # AGENT REASONING
-    # =========================
-    st.subheader("🧠 Agent Intelligence Report")
-
-    for r in reasons:
-        st.write("•", r)
-
-    # =========================
-    # STORE MEMORY (SELF LEARNING LAYER)
-    # =========================
-    memory.append({
-        "transaction": tx,
-        "risk": float(risk),
-        "decision": decision
-    })
-
-    save_memory(memory)
-
-    st.success("Transaction logged into agent memory store (JSON-based learning system)")
+    return risk, label, severity, reasons
 
 
 # =========================
 # REAL-TIME SOC DASHBOARD
 # =========================
+risk, label, severity, reasons = run_agents(tx)
+
+# =========================
+# AUTO ALERT GENERATION ENGINE
+# =========================
+if risk >= 0.45:
+
+    alert = {
+        "transaction": tx,
+        "risk": risk,
+        "decision": label,
+        "severity": severity,
+        "timestamp": time.time()
+    }
+
+    memory.append(alert)
+    save_memory(memory)
+
+# =========================
+# UI DASHBOARD
+# =========================
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Risk Score", f"{risk:.4f}")
+col2.metric("Decision", label)
+col3.metric("Alert Level", severity)
+
+st.progress(float(risk))
+
+# =========================
+# AGENT REASONING
+# =========================
+st.subheader("🧠 Agent Reasoning Layer")
+
+for r in reasons:
+    st.write("•", r)
+
+# =========================
+# HIGH RISK QUEUE (HUMAN-IN-THE-LOOP)
+# =========================
 st.divider()
-st.subheader("📊 SOC Memory Dashboard")
+st.subheader("🚨 High Risk Customer Queue (HITL)")
 
-if memory:
-    df_mem = pd.DataFrame(memory)
+high_risk = [m for m in memory if m["risk"] >= 0.75]
 
-    st.write(df_mem.tail(20))
+if high_risk:
+    df_high = pd.DataFrame(high_risk)
+    st.dataframe(df_high)
 
     st.download_button(
-        "Download SOC Logs",
-        df_mem.to_csv(index=False),
-        "soc_memory_logs.csv",
+        "Download High Risk Cases",
+        df_high.to_csv(index=False),
+        "high_risk_cases.csv",
         "text/csv"
     )
 else:
-    st.info("No transactions recorded yet.")
+    st.info("No high risk cases detected yet.")
+
+# =========================
+# SELF-HEALING FEEDBACK LOOP
+# =========================
+st.divider()
+st.subheader("🔁 Self-Healing Feedback Loop")
+
+if memory:
+    if st.button("Trigger Self-Healing Retraining"):
+
+        # convert memory into pseudo-label correction dataset
+        df_fb = pd.DataFrame([m["transaction"] for m in memory])
+        y_fb = np.array([1 if m["risk"] > 0.5 else 0 for m in memory])
+
+        ecosystem.initial_ecosystem_calibration(df_fb, y_fb)
+
+        st.success("Ecosystem re-trained using live SOC memory (self-healed)")
