@@ -13,28 +13,25 @@ from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
 MEMORY_FILE = "soc_memory.json"
 
-st.set_page_config(page_title="Autonomous Fraud SOC", layout="wide")
+st.set_page_config(page_title="Streaming Fraud SOC", layout="wide")
 
-st.title("🏦 Autonomous Agentic Fraud SOC Control Tower")
-st.markdown("Real-time ML-based multi-agent fraud detection system (no rules, no pickle)")
+st.title("🏦 REAL-TIME Streaming Fraud SOC (Agentic System)")
 
 # =========================
-# MEMORY SYSTEM
+# MEMORY
 # =========================
 def load_memory():
     if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
-            return json.load(f)
+        return json.load(open(MEMORY_FILE))
     return []
 
 def save_memory(mem):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(mem, f)
+    json.dump(mem, open(MEMORY_FILE, "w"))
 
 memory = load_memory()
 
 # =========================
-# ECOSYSTEM (REBUILD SAFE)
+# SYSTEM
 # =========================
 @st.cache_resource
 def get_ecosystem():
@@ -43,41 +40,44 @@ def get_ecosystem():
 ecosystem = get_ecosystem()
 
 # =========================
-# SIDEBAR MODE
+# STREAMING STATE
 # =========================
-st.sidebar.header("⚡ SOC Simulation Mode")
+if "running" not in st.session_state:
+    st.session_state.running = False
 
+# =========================
+# SIDEBAR
+# =========================
 mode = st.sidebar.selectbox(
-    "Select Mode",
-    ["Manual", "Random Fraud Simulation", "High Risk Simulation"]
+    "Stream Mode",
+    ["Normal Stream", "Fraud Burst Stream"]
 )
 
-# =========================
-# SYNTHETIC STREAM GENERATOR
-# =========================
-def generate_transaction(mode):
+speed = st.sidebar.slider("Speed (seconds per transaction)", 0.5, 3.0, 1.5)
 
-    if mode == "Manual":
-        return None
+# =========================
+# STREAM GENERATOR
+# =========================
+def generate_stream(mode):
 
-    if mode == "Random Fraud Simulation":
+    if mode == "Normal Stream":
         return {
-            "F115": np.random.normal(20000, 5000),
-            "F527": np.random.normal(100, 20),
-            "F531": np.random.normal(80, 10),
-            "F2582": np.random.normal(300, 50),
-            "F2678": np.random.normal(400, 80),
-            "F2956": np.random.normal(250, 60),
-            "F3043": np.random.normal(150, 40),
-            "F3912": np.random.choice([0,1], p=[0.9,0.1])
+            "F115": np.random.normal(20000, 3000),
+            "F527": np.random.normal(100, 10),
+            "F531": np.random.normal(80, 8),
+            "F2582": np.random.normal(300, 30),
+            "F2678": np.random.normal(400, 40),
+            "F2956": np.random.normal(250, 25),
+            "F3043": np.random.normal(150, 20),
+            "F3912": np.random.choice([0,1], p=[0.95,0.05])
         }
 
-    if mode == "High Risk Simulation":
+    else:
         return {
-            "F115": np.random.normal(90000, 20000),   # anomaly spike
+            "F115": np.random.normal(90000, 20000),
             "F527": np.random.normal(500, 200),
             "F531": np.random.normal(400, 150),
-            "F2582": np.nan,                          # missingness signal
+            "F2582": np.nan,
             "F2678": np.random.normal(900, 300),
             "F2956": np.random.normal(700, 200),
             "F3043": np.random.normal(600, 150),
@@ -85,128 +85,84 @@ def generate_transaction(mode):
         }
 
 # =========================
-# INPUT HANDLING
+# START / STOP CONTROLS
 # =========================
-if mode == "Manual":
-    tx = {f: st.sidebar.number_input(f, value=0.0) for f in FEATURES}
-    tx["F3912"] = st.sidebar.selectbox("Bank Flag F3912", [0, 1])
-else:
-    tx = generate_transaction(mode)
-    st.sidebar.json(tx)
+col1, col2 = st.columns(2)
 
-# =========================
-# AGENT EXECUTION ENGINE
-# =========================
-def run_system(transaction):
+start = col1.button("▶ Start Stream")
+stop = col2.button("⛔ Stop Stream")
 
-    result = ecosystem.evaluate_account(transaction)
+if start:
+    st.session_state.running = True
 
-    risk = result["risk_score"]
-    reasons = result["rationale"]
-
-    # ML-BASED INTERPRETATION LAYER (NOT RULE LOGIC)
-    if risk >= 0.75:
-        decision = "🚨 BLOCK"
-        severity = "HIGH"
-    elif risk >= 0.45:
-        decision = "⚠️ REVIEW"
-        severity = "MEDIUM"
-    else:
-        decision = "✅ ALLOW"
-        severity = "LOW"
-
-    return risk, decision, severity, reasons
-
-
-risk, decision, severity, reasons = run_system(tx)
+if stop:
+    st.session_state.running = False
 
 # =========================
-# AUTO ALERT ENGINE
+# PLACEHOLDERS (LIVE UI)
 # =========================
-if risk >= 0.45:
-    alert = {
-        "transaction": tx,
-        "risk": float(risk),
-        "decision": decision,
-        "severity": severity,
-        "timestamp": time.time()
-    }
-
-    memory.append(alert)
-    save_memory(memory)
+risk_box = st.empty()
+alert_box = st.empty()
+table_box = st.empty()
 
 # =========================
-# DASHBOARD
+# STREAM LOOP
 # =========================
-col1, col2, col3 = st.columns(3)
+if st.session_state.running:
 
-col1.metric("Risk Score", f"{risk:.4f}")
-col2.metric("Decision", decision)
-col3.metric("Severity", severity)
+    while st.session_state.running:
 
-st.progress(float(risk))
+        tx = generate_stream(mode)
+        result = ecosystem.evaluate_account(tx)
+
+        risk = result["risk_score"]
+        reasons = result["rationale"]
+
+        # =========================
+        # DECISION LAYER (NOT RULE FRAUD LOGIC)
+        # =========================
+        if risk >= 0.75:
+            decision = "🚨 BLOCK"
+        elif risk >= 0.45:
+            decision = "⚠️ REVIEW"
+        else:
+            decision = "✅ ALLOW"
+
+        # =========================
+        # ALERT ENGINE
+        # =========================
+        alert_triggered = risk >= 0.45
+
+        if alert_triggered:
+            memory.append({
+                "tx": tx,
+                "risk": float(risk),
+                "decision": decision,
+                "time": time.time()
+            })
+            save_memory(memory)
+
+        # =========================
+        # LIVE UI UPDATE
+        # =========================
+        risk_box.metric("Live Risk Score", f"{risk:.4f}")
+        alert_box.markdown(f"### Decision: {decision}")
+
+        # =========================
+        # HIGH RISK QUEUE
+        # =========================
+        high_risk = [m for m in memory if m["risk"] >= 0.75]
+        table_box.dataframe(pd.DataFrame(high_risk))
+
+        time.sleep(speed)
 
 # =========================
-# AGENT REASONING
-# =========================
-st.subheader("🧠 Agent Reasoning Layer")
-
-for r in reasons:
-    st.write("•", r)
-
-# =========================
-# HIGH RISK QUEUE (HITL)
-# =========================
-st.divider()
-st.subheader("🚨 High Risk Customer Queue (Human-in-the-loop)")
-
-high_risk = [m for m in memory if m["risk"] >= 0.75]
-
-if high_risk:
-    df_high = pd.DataFrame(high_risk)
-
-    st.dataframe(df_high)
-
-    st.download_button(
-        "Download High Risk Cases",
-        df_high.to_csv(index=False),
-        "high_risk_cases.csv",
-        "text/csv"
-    )
-else:
-    st.info("No high-risk cases detected yet.")
-
-# =========================
-# FULL SOC MEMORY
+# MANUAL MEMORY VIEW
 # =========================
 st.divider()
-st.subheader("📊 SOC Transaction Memory")
+st.subheader("📊 SOC Memory Log")
 
 if memory:
-    df_mem = pd.DataFrame(memory)
-    st.dataframe(df_mem.tail(20))
-
-    st.download_button(
-        "Download SOC Logs",
-        df_mem.to_csv(index=False),
-        "soc_logs.csv",
-        "text/csv"
-    )
+    st.dataframe(pd.DataFrame(memory))
 else:
-    st.info("No transactions recorded yet.")
-
-# =========================
-# SELF-HEALING LOOP
-# =========================
-st.divider()
-st.subheader("🔁 Self-Healing System")
-
-if memory:
-    if st.button("Trigger Self-Healing Retraining"):
-
-        df_fb = pd.DataFrame([m["transaction"] for m in memory])
-        y_fb = np.array([1 if m["risk"] > 0.5 else 0 for m in memory])
-
-        ecosystem.initial_ecosystem_calibration(df_fb, y_fb)
-
-        st.success("SOC ecosystem re-trained using live memory (self-healed intelligence updated)")
+    st.info("No SOC activity yet.")
