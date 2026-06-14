@@ -1,12 +1,8 @@
 streamlit
-pandas
 numpy
+pandas
 scikit-learn
 xgboost
 lightgbm
 umap-learn
 hdbscan
-joblib
-shap
-scipy
-openpyxl
