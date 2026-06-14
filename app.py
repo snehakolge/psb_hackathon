@@ -4,24 +4,28 @@ import pandas as pd
 import time
 
 # =========================================================
-# PAGE CONFIG
+# INIT STATE (CRITICAL FIX)
 # =========================================================
-st.set_page_config(page_title="RBI AML SOC", layout="wide")
-st.title("🏦 RBI AML + Fraud SOC (Stable Real-Time Streaming)")
-
-# =========================================================
-# STATE INIT (CRITICAL FIX)
-# =========================================================
-if "initialized" not in st.session_state:
-    st.session_state.initialized = True
+if "running" not in st.session_state:
     st.session_state.running = False
+
+if "tick" not in st.session_state:
     st.session_state.tick = 0
+
+if "events" not in st.session_state:
     st.session_state.events = []
+
+if "cases" not in st.session_state:
     st.session_state.cases = []
 
+if "feedback" not in st.session_state:
+    st.session_state.feedback = []
+
 # =========================================================
-# START / STOP CONTROL
+# UI HEADER
 # =========================================================
+st.title("🏦 RBI AML + Fraud SOC (REAL-TIME AGENTIC STREAM)")
+
 col1, col2 = st.columns(2)
 
 if col1.button("▶ START STREAM"):
@@ -31,132 +35,153 @@ if col2.button("⛔ STOP STREAM"):
     st.session_state.running = False
 
 # =========================================================
-# TRANSACTION GENERATOR (FORCED ACTIVITY)
+# AGENTIC RISK ENGINE (NOT RULES — SIMULATED ML BEHAVIOR)
 # =========================================================
-def generate_tx():
+def agents(tx):
 
-    fraud = np.random.rand() < 0.6  # ensure active stream
+    risk = 0.0
+    reasons = []
 
-    tx = {
-        "amount": np.random.normal(90000, 40000),
-        "fraud_signal": fraud
-    }
+    # Agent 1: anomaly detection behavior
+    anomaly = np.random.rand()
 
-    if fraud:
-        tx["amount"] = np.random.normal(180000, 60000)
+    if anomaly > 0.7:
+        risk += 0.35
+        reasons.append("Behavioral Anomaly Agent Triggered")
 
-    return tx
-
-# =========================================================
-# RISK ENGINE (ML SUBSTITUTE - STABLE)
-# =========================================================
-def risk_engine(tx):
-
-    risk = 0.2
-
-    if tx["amount"] > 100000:
+    # Agent 2: amount intelligence
+    if tx["amount"] > np.random.normal(100000, 30000):
         risk += 0.4
+        reasons.append("Statistical Amount Deviation Detected")
 
-    if tx["fraud_signal"]:
-        risk += 0.4
+    # Agent 3: drift intelligence
+    if np.random.rand() > 0.8:
+        risk += 0.25
+        reasons.append("Population Drift Detected")
 
-    return float(np.clip(risk, 0, 1))
+    return min(risk, 1.0), reasons
 
 # =========================================================
-# RBI POLICY ENGINE
+# DECISION ENGINE (RBI STYLE ACTIONS)
 # =========================================================
-def decision_engine(risk):
+def decision(risk):
 
-    if risk > 0.7:
+    if risk > 0.75:
         return "FREEZE"
-    elif risk > 0.4:
+    elif risk > 0.5:
+        return "STR"
+    elif risk > 0.3:
         return "REVIEW"
     else:
         return "ALLOW"
 
 # =========================================================
-# STREAM STEP (CORE FIX)
+# TRANSACTION STREAM (FORCED CONTINUITY)
+# =========================================================
+def generate_tx():
+
+    fraud_spike = np.random.rand() < 0.2
+
+    return {
+        "amount": np.random.normal(120000, 60000) if fraud_spike else np.random.normal(30000, 10000)
+    }
+
+# =========================================================
+# STREAM STEP
 # =========================================================
 def step():
 
     st.session_state.tick += 1
 
     tx = generate_tx()
-    risk = risk_engine(tx)
-    decision = decision_engine(risk)
+
+    risk, reasons = agents(tx)
+
+    action = decision(risk)
 
     event = {
         "tick": st.session_state.tick,
         "amount": float(tx["amount"]),
         "risk": float(risk),
-        "decision": decision
+        "action": action,
+        "reasons": reasons
     }
 
-    # STORE EVENTS (NEVER EMPTY)
     st.session_state.events.insert(0, event)
-    st.session_state.events = st.session_state.events[:50]
 
-    # HITL QUEUE (FIXED LOGIC)
-    if decision in ["REVIEW", "FREEZE"]:
+    if action in ["REVIEW", "STR", "FREEZE"]:
         st.session_state.cases.insert(0, event)
-        st.session_state.cases = st.session_state.cases[:30]
+
+    st.session_state.events = st.session_state.events[:30]
+    st.session_state.cases = st.session_state.cases[:20]
 
 # =========================================================
-# STREAM LOOP (IMPORTANT FIX)
+# FORCE STREAM LOOP (THIS IS THE FIX)
 # =========================================================
 if st.session_state.running:
 
     step()
-    time.sleep(0.6)
+    time.sleep(0.7)
     st.rerun()
 
 # =========================================================
-# LIVE SOC STREAM
+# LIVE ALERT STREAM
 # =========================================================
 st.subheader("🚨 LIVE SOC ALERT STREAM")
 
 if len(st.session_state.events) == 0:
-    st.warning("STREAM ACTIVE → generating AML signals...")
+    st.warning("STREAM WARMING UP... WAITING FOR TRANSACTIONS")
 
 for e in st.session_state.events[:10]:
 
-    if e["decision"] == "FREEZE":
-        st.error(f"🧊 FREEZE | Tick {e['tick']} | Risk={e['risk']:.2f}")
+    if e["action"] == "FREEZE":
+        st.error(f"🧊 FREEZE | Risk={e['risk']:.2f} | {e['reasons']}")
 
-    elif e["decision"] == "REVIEW":
-        st.warning(f"⚠️ REVIEW | Tick {e['tick']} | Risk={e['risk']:.2f}")
+    elif e["action"] == "STR":
+        st.warning(f"📌 STR ALERT | Risk={e['risk']:.2f} | {e['reasons']}")
+
+    elif e["action"] == "REVIEW":
+        st.warning(f"⚠️ REVIEW | Risk={e['risk']:.2f} | {e['reasons']}")
 
     else:
-        st.info(f"🟢 ALLOW | Tick {e['tick']} | Risk={e['risk']:.2f}")
+        st.success(f"🟢 ALLOW | Risk={e['risk']:.2f}")
 
 # =========================================================
 # HITL QUEUE
 # =========================================================
 st.subheader("📌 AML Investigation Queue (HITL)")
 
-if len(st.session_state.cases) > 0:
+if st.session_state.cases:
     st.dataframe(pd.DataFrame(st.session_state.cases))
 else:
-    st.info("No AML cases yet — waiting for escalation")
+    st.info("No AML cases yet")
 
 # =========================================================
-# CTR / STR METRICS (FIXED + ALWAYS VISIBLE)
+# CTR / STR
 # =========================================================
 st.subheader("📊 Regulatory Reporting (CTR / STR)")
 
-ctr = sum(1 for e in st.session_state.events if e["amount"] > 200000)
-str_count = len(st.session_state.cases)
+ctr = sum(1 for e in st.session_state.events if e["amount"] > 150000)
+str_count = sum(1 for e in st.session_state.events if e["action"] == "STR")
 
 c1, c2 = st.columns(2)
 c1.metric("CTR COUNT", ctr)
 c2.metric("STR COUNT", str_count)
 
 # =========================================================
-# DEBUG PANEL (IMPORTANT FOR HACKATHON)
+# HUMAN FEEDBACK LOOP
 # =========================================================
-st.subheader("🧠 System Status")
+st.subheader("👨‍💼 Human Feedback")
 
-st.write("RUNNING:", st.session_state.running)
-st.write("TICK:", st.session_state.tick)
-st.write("EVENTS:", len(st.session_state.events))
-st.write("CASES:", len(st.session_state.cases))
+if st.session_state.cases:
+
+    feedback_action = st.selectbox("Label last case", ["CONFIRM STR", "CONFIRM FREEZE", "FALSE POSITIVE"])
+
+    if st.button("Submit Feedback"):
+
+        st.session_state.feedback.append({
+            "case": st.session_state.cases[0],
+            "label": feedback_action
+        })
+
+        st.success("Feedback learned by system (self-healing simulation)")
