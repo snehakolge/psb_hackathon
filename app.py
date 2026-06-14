@@ -15,11 +15,11 @@ MEMORY_FILE = "soc_memory.json"
 
 st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
 
-st.title("🏦 Real-Time Agentic Fraud SOC (Production Safe Version)")
-st.markdown("Streaming multi-agent ML system with self-learning memory")
+st.title("🏦 Adaptive Agentic Fraud SOC (Self-Healing System)")
+st.markdown("Streaming ML agents + feedback learning + anomaly injection")
 
 # =========================
-# SAFE JSON SERIALIZER
+# SAFE JSON HANDLING
 # =========================
 def clean_json(obj):
 
@@ -29,7 +29,7 @@ def clean_json(obj):
     if isinstance(obj, list):
         return [clean_json(v) for v in obj]
 
-    if hasattr(obj, "item"):  # numpy types
+    if hasattr(obj, "item"):
         return obj.item()
 
     if isinstance(obj, float) and np.isnan(obj):
@@ -38,7 +38,7 @@ def clean_json(obj):
     return obj
 
 # =========================
-# SAFE MEMORY LOADER (FIXED JSON ERROR)
+# MEMORY (SAFE LOAD)
 # =========================
 def load_memory():
 
@@ -48,30 +48,21 @@ def load_memory():
     try:
         with open(MEMORY_FILE, "r") as f:
             data = f.read().strip()
-
             if not data:
                 return []
-
             return json.loads(data)
 
-    except (json.JSONDecodeError, ValueError):
-        return []  # fallback if file is corrupted
+    except Exception:
+        return []
 
-# =========================
-# SAFE MEMORY SAVER
-# =========================
 def save_memory(mem):
-    try:
-        with open(MEMORY_FILE, "w") as f:
-            json.dump(clean_json(mem), f)
-    except Exception as e:
-        st.warning(f"Memory save failed: {e}")
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(clean_json(mem), f)
 
-# Load memory safely
 memory = load_memory()
 
 # =========================
-# ECOSYSTEM (NO PICKLE)
+# AGENT ECOSYSTEM
 # =========================
 @st.cache_resource
 def get_ecosystem():
@@ -103,47 +94,73 @@ if col2.button("⛔ Stop Stream"):
     st.session_state.streaming = False
 
 # =========================
-# TRANSACTION GENERATOR
+# TRANSACTION GENERATOR (FIXED: ANOMALY BOOST)
 # =========================
 def generate_transaction():
 
-    mode = st.sidebar.selectbox(
-        "Stream Mode",
-        ["Normal", "Fraud Burst"]
-    )
+    mode = st.sidebar.selectbox("Stream Mode", ["Normal", "Stress Test"])
 
     if mode == "Normal":
         return {
-            "F115": np.random.normal(20000, 3000),
-            "F527": np.random.normal(100, 10),
-            "F531": np.random.normal(80, 8),
-            "F2582": np.random.normal(300, 30),
-            "F2678": np.random.normal(400, 40),
-            "F2956": np.random.normal(250, 25),
-            "F3043": np.random.normal(150, 20),
-            "F3912": np.random.choice([0,1], p=[0.95,0.05])
+            "F115": np.random.normal(20000, 5000),
+            "F527": np.random.normal(100, 30),
+            "F531": np.random.normal(80, 20),
+            "F2582": np.random.normal(300, 100),
+            "F2678": np.random.normal(400, 120),
+            "F2956": np.random.normal(250, 90),
+            "F3043": np.random.normal(150, 50),
+            "F3912": np.random.choice([0,1], p=[0.97,0.03])
         }
 
+    # 🔥 STRESS MODE → FORCES ALERTS
     return {
-        "F115": np.random.normal(90000, 20000),
-        "F527": np.random.normal(500, 200),
-        "F531": np.random.normal(400, 150),
+        "F115": np.random.choice([90000, 150000, 250000]),
+        "F527": np.random.choice([800, 1500, 2500]),
+        "F531": np.nan,
         "F2582": np.nan,
-        "F2678": np.random.normal(900, 300),
-        "F2956": np.random.normal(700, 200),
-        "F3043": np.random.normal(600, 150),
+        "F2678": np.random.normal(2000, 500),
+        "F2956": np.random.normal(1800, 600),
+        "F3043": np.random.normal(1500, 400),
         "F3912": 1
     }
 
 # =========================
-# AGENT ENGINE
+# AGENT EXECUTION
 # =========================
 def run_agents(tx):
     result = ecosystem.evaluate_account(tx)
     return result["risk_score"], result["rationale"]
 
 # =========================
-# STREAM ENGINE (SAFE RERUN)
+# SELF-LEARNING FUNCTION (IMPORTANT)
+# =========================
+def retrain_if_needed(ecosystem, memory):
+
+    feedback = [m for m in memory if "label" in m]
+
+    if len(feedback) < 5:
+        return
+
+    X, y = [], []
+
+    for item in feedback:
+        tx = item["tx"]
+        label = item["label"]
+
+        X.append(list(tx.values()))
+
+        y.append(1 if label == "BLOCK" else 0)
+
+    X = np.array(X)
+    y = np.array(y)
+
+    ecosystem.main_agent.fit(
+        pd.DataFrame(X, columns=FEATURES),
+        y
+    )
+
+# =========================
+# STREAM ENGINE (SAFE)
 # =========================
 if st.session_state.streaming:
 
@@ -153,20 +170,26 @@ if st.session_state.streaming:
     st.session_state.last_tx = tx
     st.session_state.last_risk = risk
 
-    # SAVE MEMORY (SAFE)
+    # 🔥 ALERT CONDITION (DATA-DRIVEN, NOT RULE MODEL)
+    alert_risk = risk
+
     memory.append(clean_json({
         "tx": tx,
         "risk": float(risk),
-        "time": time.time()
+        "time": time.time(),
+        "alert": alert_risk > 0.6
     }))
 
     save_memory(memory)
+
+    # 🔁 SELF-HEALING TRIGGER
+    retrain_if_needed(ecosystem, memory)
 
     time.sleep(1)
     st.rerun()
 
 # =========================
-# LIVE DASHBOARD
+# DASHBOARD
 # =========================
 st.subheader("📊 Live SOC Output")
 
@@ -201,25 +224,25 @@ if st.session_state.last_risk is not None:
 # HIGH RISK QUEUE
 # =========================
 st.divider()
-st.subheader("🚨 High Risk Queue (HITL)")
+st.subheader("🚨 High Risk Queue")
 
 high_risk = [m for m in memory if m.get("risk", 0) >= 0.75]
 
 if high_risk:
     st.dataframe(pd.DataFrame(high_risk))
 else:
-    st.info("No high-risk cases yet.")
+    st.info("No high-risk cases detected.")
 
 # =========================
-# MEMORY VIEW
+# MEMORY LOG
 # =========================
 st.divider()
-st.subheader("📦 SOC Memory Log")
+st.subheader("📦 SOC Memory")
 
 if memory:
-    st.dataframe(pd.DataFrame(memory).tail(20))
+    st.dataframe(pd.DataFrame(memory).tail(30))
 else:
-    st.info("No activity recorded yet.")
+    st.info("No SOC activity yet.")
 
 # =========================
 # HUMAN FEEDBACK LOOP
@@ -245,4 +268,4 @@ if st.session_state.last_tx is not None:
 
         save_memory(memory)
 
-        st.success("Feedback saved → system learning updated")
+        st.success("Feedback stored → model will self-update")
