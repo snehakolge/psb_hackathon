@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import time
 import json
-import os
 
 from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 
@@ -12,21 +11,18 @@ from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 # =========================================================
 FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
 
-st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
+st.set_page_config(page_title="RBI AML SOC", layout="wide")
 
-st.title("🏦 PSB Hackathon - Agentic Fraud SOC (Clean Architecture)")
+st.title("🏦 RBI-Compliant AML + Fraud SOC (CTR/STR + Agentic AI)")
 
 # =========================================================
-# SAFE STATE STORAGE (IMPORTANT FIX)
+# STATE INIT
 # =========================================================
 if "events" not in st.session_state:
     st.session_state.events = []
 
-if "feedback" not in st.session_state:
-    st.session_state.feedback = []
-
-if "high_risk_queue" not in st.session_state:
-    st.session_state.high_risk_queue = []
+if "cases" not in st.session_state:
+    st.session_state.cases = []
 
 if "running" not in st.session_state:
     st.session_state.running = False
@@ -35,7 +31,7 @@ if "step" not in st.session_state:
     st.session_state.step = 0
 
 # =========================================================
-# ML ECOSYSTEM
+# ML ECOSYSTEM (YOUR MODEL)
 # =========================================================
 @st.cache_resource
 def get_ecosystem():
@@ -48,53 +44,60 @@ ecosystem = get_ecosystem()
 # =========================================================
 col1, col2 = st.columns(2)
 
-if col1.button("▶ Start SOC Stream"):
+if col1.button("▶ Start AML SOC Stream"):
     st.session_state.running = True
 
-if col2.button("⛔ Stop SOC Stream"):
+if col2.button("⛔ Stop Stream"):
     st.session_state.running = False
 
 # =========================================================
-# TRANSACTION GENERATOR
+# TRANSACTION GENERATOR (REALISTIC FRAUD + AML MIX)
 # =========================================================
 def generate_transaction(step):
 
-    fraud = np.random.rand() < 0.15
+    fraud = np.random.rand() < 0.20
 
     if fraud:
-        return {
-            "F115": np.random.normal(150000, 30000),
-            "F527": np.random.normal(2000, 500),
-            "F531": np.nan,
-            "F2582": np.nan,
-            "F2678": np.random.normal(5000, 1000),
-            "F2956": np.random.normal(4000, 800),
-            "F3043": np.random.normal(3500, 900),
-            "F3912": 1
-        }
+        amount = np.random.normal(200000, 80000)
+    else:
+        amount = np.random.normal(25000, 8000)
 
     return {
-        "F115": np.random.normal(20000, 5000),
-        "F527": np.random.normal(100, 30),
-        "F531": np.random.normal(80, 20),
-        "F2582": np.random.normal(300, 100),
-        "F2678": np.random.normal(400, 120),
-        "F2956": np.random.normal(250, 90),
-        "F3043": np.random.normal(150, 50),
-        "F3912": np.random.choice([0,1], p=[0.97,0.03])
+        "F115": amount,
+        "F527": np.random.normal(120, 40),
+        "F531": np.random.normal(90, 25),
+        "F2582": np.random.normal(300, 120),
+        "F2678": np.random.normal(400, 150),
+        "F2956": np.random.normal(250, 100),
+        "F3043": np.random.normal(150, 60),
+        "F3912": int(fraud)
     }
 
 # =========================================================
-# SOC POLICY ENGINE
+# AML / RBI POLICY ENGINE (REALISTIC)
 # =========================================================
-def decide_action(risk):
+def aml_policy(risk, amount):
 
+    # CTR RULE (simplified RBI AML logic)
+    ctr_flag = amount >= 1000000  # ₹10 lakh threshold proxy
+
+    # STR RULE (ML risk-based trigger)
+    str_flag = risk > 0.55
+
+    # CASE LIFECYCLE
     if risk > 0.80:
-        return "FREEZE"
+        action = "TEMP_HOLD"
+        case_status = "ESCALATED"
+
     elif risk > 0.55:
-        return "REVIEW"
+        action = "REFER"
+        case_status = "OPEN"
+
     else:
-        return "ALLOW"
+        action = "CLEAR"
+        case_status = "NO_CASE"
+
+    return action, case_status, ctr_flag, str_flag
 
 # =========================================================
 # STREAM LOOP
@@ -102,108 +105,131 @@ def decide_action(risk):
 if st.session_state.running:
 
     st.session_state.step += 1
-    step = st.session_state.step
+    txn_id = f"T{st.session_state.step}"
 
-    tx = generate_transaction(step)
+    tx = generate_transaction(st.session_state.step)
 
-    # ML inference (YOUR ECO SYSTEM)
+    # =========================
+    # ML RISK SCORE (YOUR ECO SYSTEM)
+    # =========================
     result = ecosystem.evaluate_account(tx)
 
     risk = float(result["risk_score"])
     reasons = result["rationale"]
 
-    decision = decide_action(risk)
+    # =========================
+    # AML LOGIC (CTR / STR)
+    # =========================
+    action, case_status, ctr_flag, str_flag = aml_policy(
+        risk,
+        tx["F115"]
+    )
 
-    txn_id = f"T{step}"
-
-    # =====================================================
-    # CLEAN EVENT OBJECT (IMPORTANT FIX)
-    # =====================================================
+    # =========================
+    # EVENT STRUCTURE (CLEAN SOC DESIGN)
+    # =========================
     event = {
         "txn_id": txn_id,
-        "transaction": tx,
-        "risk": risk,
-        "decision": decision,
+        "amount": float(tx["F115"]),
+        "risk_score": risk,
+        "action": action,
+        "case_status": case_status,
+        "CTR": ctr_flag,
+        "STR": str_flag,
         "reasons": reasons,
         "timestamp": time.time()
     }
 
-    # STORE ONLY EVENTS HERE (NO MIXING)
     st.session_state.events.insert(0, event)
     st.session_state.events = st.session_state.events[:50]
 
-    # =====================================================
-    # HIGH RISK QUEUE
-    # =====================================================
-    if decision in ["FREEZE", "REVIEW"]:
-        st.session_state.high_risk_queue.insert(0, event)
+    # =========================
+    # CASE QUEUE (HITL AML TEAM)
+    # =========================
+    if case_status in ["OPEN", "ESCALATED"]:
+        st.session_state.cases.insert(0, event)
 
-    st.session_state.high_risk_queue = st.session_state.high_risk_queue[:20]
+    st.session_state.cases = st.session_state.cases[:30]
 
-    # =====================================================
-    # HUMAN FEEDBACK TRIGGER (SEPARATE STREAM)
-    # =====================================================
     time.sleep(1)
     st.rerun()
 
 # =========================================================
-# LIVE ALERT STREAM (SAFE ACCESS FIX)
+# LIVE SOC ALERT STREAM
 # =========================================================
-st.subheader("🚨 LIVE SOC ALERT STREAM")
+st.subheader("🚨 LIVE AML SOC ALERT STREAM")
 
-if st.session_state.events:
+for e in st.session_state.events[:10]:
 
-    for e in st.session_state.events[:10]:
+    flags = []
+    if e["CTR"]:
+        flags.append("CTR")
+    if e["STR"]:
+        flags.append("STR")
 
-        if e["decision"] == "FREEZE":
-            st.error(f"🚨 FREEZE | Risk={e['risk']:.2f} | {e['txn_id']}")
+    flag_text = "|".join(flags) if flags else "NONE"
 
-        elif e["decision"] == "REVIEW":
-            st.warning(f"⚠️ REVIEW | Risk={e['risk']:.2f} | {e['txn_id']}")
+    if e["action"] == "TEMP_HOLD":
+        st.error(f"🧊 TEMP_HOLD | {e['txn_id']} | Risk={e['risk_score']:.2f} | {flag_text}")
 
-        else:
-            st.success(f"✅ ALLOW | Risk={e['risk']:.2f} | {e['txn_id']}")
+    elif e["action"] == "REFER":
+        st.warning(f"⚠️ REFER CASE | {e['txn_id']} | Risk={e['risk_score']:.2f} | {flag_text}")
+
+    else:
+        st.success(f"✅ CLEAR | {e['txn_id']} | Risk={e['risk_score']:.2f}")
 
 # =========================================================
-# HIGH RISK QUEUE
+# AML CASE QUEUE
 # =========================================================
-st.subheader("🔥 High Risk Queue (HITL)")
+st.subheader("📌 AML Investigation Queue (HITL)")
 
-if st.session_state.high_risk_queue:
-    st.dataframe(pd.DataFrame(st.session_state.high_risk_queue))
+if st.session_state.cases:
+    st.dataframe(pd.DataFrame(st.session_state.cases))
 else:
-    st.info("No high-risk cases yet.")
+    st.info("No AML cases yet")
 
 # =========================================================
-# EVENT LOG
+# CTR / STR SUMMARY
 # =========================================================
-st.subheader("📦 SOC Event Log")
+st.subheader("📊 Regulatory Reporting (CTR / STR)")
 
-if st.session_state.events:
-    st.dataframe(pd.DataFrame(st.session_state.events))
+df = pd.DataFrame(st.session_state.events) if st.session_state.events else pd.DataFrame()
+
+if not df.empty:
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Total Events", len(df))
+    col2.metric("CTR Flags", int(df["CTR"].sum()))
+    col3.metric("STR Flags", int(df["STR"].sum()))
+
+    st.bar_chart(df["action"].value_counts())
+
 else:
-    st.info("No events yet.")
+    st.info("No data yet")
 
 # =========================================================
-# HUMAN FEEDBACK (SEPARATE STREAM - FIXED DESIGN)
+# AML CASE INSIGHT (EXPLAINABILITY)
 # =========================================================
-st.subheader("👨‍💼 Human Feedback Loop")
+st.subheader("🧠 Latest Case Reasoning")
 
-if st.session_state.events:
+if st.session_state.cases:
 
-    last_event = st.session_state.events[0]
+    latest = st.session_state.cases[0]
 
-    label = st.selectbox("Label Transaction", ["ALLOW", "REVIEW", "BLOCK", "FREEZE"])
+    st.write(f"""
+**Transaction ID:** {latest['txn_id']}  
+**Action:** {latest['action']}  
+**Case Status:** {latest['case_status']}  
+**CTR Flag:** {latest['CTR']}  
+**STR Flag:** {latest['STR']}  
+**Risk Score:** {latest['risk_score']:.2f}
 
-    if st.button("Submit Feedback"):
+**Reasons:**
+""")
 
-        feedback_entry = {
-            "txn_id": last_event["txn_id"],
-            "transaction": last_event["transaction"],
-            "label": label,
-            "timestamp": time.time()
-        }
+    for r in latest["reasons"]:
+        st.write("•", r)
 
-        st.session_state.feedback.append(feedback_entry)
-
-        st.success("Feedback saved (used for self-healing retraining)")
+else:
+    st.info("Waiting for suspicious activity...")
