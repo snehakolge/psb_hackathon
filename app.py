@@ -15,8 +15,27 @@ MEMORY_FILE = "soc_memory.json"
 
 st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
 
-st.title("🏦 Agentic Real-Time Fraud SOC (Self-Learning System)")
+st.title("🏦 Real-Time Agentic Fraud SOC (Self-Learning System)")
 st.markdown("Multi-agent ML system with streaming + human feedback loop")
+
+# =========================
+# SAFE JSON SERIALIZER (IMPORTANT FIX)
+# =========================
+def clean_json(obj):
+
+    if isinstance(obj, dict):
+        return {k: clean_json(v) for k, v in obj.items()}
+
+    if isinstance(obj, list):
+        return [clean_json(v) for v in obj]
+
+    if hasattr(obj, "item"):  # numpy types
+        return obj.item()
+
+    if isinstance(obj, float) and np.isnan(obj):
+        return None
+
+    return obj
 
 # =========================
 # MEMORY SYSTEM
@@ -27,7 +46,7 @@ def load_memory():
     return []
 
 def save_memory(mem):
-    json.dump(mem, open(MEMORY_FILE, "w"))
+    json.dump(clean_json(mem), open(MEMORY_FILE, "w"))
 
 memory = load_memory()
 
@@ -41,7 +60,7 @@ def get_ecosystem():
 ecosystem = get_ecosystem()
 
 # =========================
-# STREAM STATE
+# SESSION STATE
 # =========================
 if "streaming" not in st.session_state:
     st.session_state.streaming = False
@@ -97,7 +116,7 @@ def generate_transaction():
     }
 
 # =========================
-# RUN AGENTS
+# AGENT RUNNER
 # =========================
 def run_agents(tx):
 
@@ -109,7 +128,7 @@ def run_agents(tx):
     return risk, reasons
 
 # =========================
-# STREAM EXECUTION (SAFE METHOD)
+# STREAM ENGINE (SAFE RERUN STYLE)
 # =========================
 if st.session_state.streaming:
 
@@ -119,21 +138,20 @@ if st.session_state.streaming:
     st.session_state.last_tx = tx
     st.session_state.last_risk = risk
 
-    # ALERT GENERATION (NOT RULE FRAUD LOGIC, ONLY OBSERVATION THRESHOLD)
-    alert = {
+    # SAVE TO MEMORY (SAFE)
+    memory.append(clean_json({
         "tx": tx,
         "risk": float(risk),
         "time": time.time()
-    }
+    }))
 
-    memory.append(alert)
     save_memory(memory)
 
     time.sleep(1)
     st.rerun()
 
 # =========================
-# DASHBOARD
+# LIVE DASHBOARD
 # =========================
 st.subheader("📊 Live SOC Output")
 
@@ -146,7 +164,7 @@ if st.session_state.last_risk is not None:
 
     col1.metric("Risk Score", f"{risk:.4f}")
 
-    # ML-BASED INTERPRETATION ONLY (NO HARD RULES INSIDE MODEL)
+    # INTERPRETATION LAYER (NOT FRAUD RULES INSIDE MODEL)
     if risk >= 0.75:
         status = "🚨 HIGH RISK"
     elif risk >= 0.45:
@@ -170,7 +188,7 @@ if st.session_state.last_risk is not None:
 st.divider()
 st.subheader("🚨 High Risk Queue (HITL)")
 
-high_risk = [m for m in memory if m["risk"] >= 0.75]
+high_risk = [m for m in memory if m.get("risk", 0) >= 0.75]
 
 if high_risk:
     st.dataframe(pd.DataFrame(high_risk))
@@ -178,7 +196,7 @@ else:
     st.info("No high-risk cases yet.")
 
 # =========================
-# MEMORY VIEW
+# MEMORY LOG
 # =========================
 st.divider()
 st.subheader("📦 SOC Memory")
@@ -189,7 +207,7 @@ else:
     st.info("No activity recorded yet.")
 
 # =========================
-# HUMAN FEEDBACK LOOP (SELF HEALING)
+# HUMAN FEEDBACK LOOP
 # =========================
 st.divider()
 st.subheader("👨‍💼 Human-in-the-Loop Feedback")
@@ -203,12 +221,13 @@ if st.session_state.last_tx is not None:
 
     if st.button("Submit Feedback"):
 
-        memory.append({
+        memory.append(clean_json({
             "tx": st.session_state.last_tx,
             "risk": float(st.session_state.last_risk),
-            "label": feedback
-        })
+            "label": feedback,
+            "time": time.time()
+        }))
 
         save_memory(memory)
 
-        st.success("Feedback stored for self-learning")
+        st.success("Feedback saved for self-learning system")
