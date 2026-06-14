@@ -13,21 +13,22 @@ from agent_ecosystem_engine import AdaptiveConsensusEcosystem
 FEATURES = ['F115','F527','F531','F2582','F2678','F2956','F3043']
 MEMORY_FILE = "soc_memory.json"
 
-st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
+st.set_page_config(page_title="Autonomous SOC", layout="wide")
 
-st.title("🏦 Adaptive Agentic Fraud SOC (Self-Healing System)")
-st.markdown("Streaming ML agents + feedback learning + anomaly injection")
+st.title("🏦 Autonomous Agentic Fraud SOC (REAL-TIME SELF-LEARNING)")
+
+st.markdown("Continuous ML-driven SOC with adaptive alerts + self-healing loop")
 
 # =========================
 # SAFE JSON HANDLING
 # =========================
-def clean_json(obj):
+def clean(obj):
 
     if isinstance(obj, dict):
-        return {k: clean_json(v) for k, v in obj.items()}
+        return {k: clean(v) for k, v in obj.items()}
 
     if isinstance(obj, list):
-        return [clean_json(v) for v in obj]
+        return [clean(v) for v in obj]
 
     if hasattr(obj, "item"):
         return obj.item()
@@ -38,10 +39,9 @@ def clean_json(obj):
     return obj
 
 # =========================
-# MEMORY (SAFE LOAD)
+# MEMORY SAFE LOAD
 # =========================
 def load_memory():
-
     if not os.path.exists(MEMORY_FILE):
         return []
 
@@ -51,18 +51,17 @@ def load_memory():
             if not data:
                 return []
             return json.loads(data)
-
-    except Exception:
+    except:
         return []
 
 def save_memory(mem):
     with open(MEMORY_FILE, "w") as f:
-        json.dump(clean_json(mem), f)
+        json.dump(clean(mem), f)
 
 memory = load_memory()
 
 # =========================
-# AGENT ECOSYSTEM
+# AGENT SYSTEM
 # =========================
 @st.cache_resource
 def get_ecosystem():
@@ -71,10 +70,13 @@ def get_ecosystem():
 ecosystem = get_ecosystem()
 
 # =========================
-# SESSION STATE
+# STATE
 # =========================
-if "streaming" not in st.session_state:
-    st.session_state.streaming = False
+if "running" not in st.session_state:
+    st.session_state.running = False
+
+if "step" not in st.session_state:
+    st.session_state.step = 0
 
 if "last_tx" not in st.session_state:
     st.session_state.last_tx = None
@@ -83,107 +85,114 @@ if "last_risk" not in st.session_state:
     st.session_state.last_risk = None
 
 # =========================
-# STREAM CONTROLS
+# START / STOP
 # =========================
 col1, col2 = st.columns(2)
 
-if col1.button("▶ Start Stream"):
-    st.session_state.streaming = True
+if col1.button("▶ START AUTONOMOUS SOC"):
+    st.session_state.running = True
 
-if col2.button("⛔ Stop Stream"):
-    st.session_state.streaming = False
+if col2.button("⛔ STOP SOC"):
+    st.session_state.running = False
 
 # =========================
-# TRANSACTION GENERATOR (FIXED: ANOMALY BOOST)
+# AUTONOMOUS STREAM (NO MODES)
 # =========================
-def generate_transaction():
+def generate_transaction(step):
 
-    mode = st.sidebar.selectbox("Stream Mode", ["Normal", "Stress Test"])
+    drift = np.sin(step / 8) * 0.25
 
-    if mode == "Normal":
-        return {
-            "F115": np.random.normal(20000, 5000),
-            "F527": np.random.normal(100, 30),
-            "F531": np.random.normal(80, 20),
-            "F2582": np.random.normal(300, 100),
-            "F2678": np.random.normal(400, 120),
-            "F2956": np.random.normal(250, 90),
-            "F3043": np.random.normal(150, 50),
-            "F3912": np.random.choice([0,1], p=[0.97,0.03])
-        }
-
-    # 🔥 STRESS MODE → FORCES ALERTS
     return {
-        "F115": np.random.choice([90000, 150000, 250000]),
-        "F527": np.random.choice([800, 1500, 2500]),
-        "F531": np.nan,
-        "F2582": np.nan,
-        "F2678": np.random.normal(2000, 500),
-        "F2956": np.random.normal(1800, 600),
-        "F3043": np.random.normal(1500, 400),
-        "F3912": 1
+        "F115": np.random.normal(20000 * (1 + drift), 6000),
+        "F527": np.random.normal(100 * (1 + drift), 40),
+        "F531": np.random.normal(80 * (1 + drift), 25),
+        "F2582": np.random.normal(300 * (1 + drift), 120),
+        "F2678": np.random.normal(400 * (1 + drift), 150),
+        "F2956": np.random.normal(250 * (1 + drift), 100),
+        "F3043": np.random.normal(150 * (1 + drift), 60),
+
+        # hidden anomaly drift
+        "F3912": np.random.choice(
+            [0, 1],
+            p=[0.92 - drift * 0.1, 0.08 + drift * 0.1]
+        )
     }
 
 # =========================
-# AGENT EXECUTION
+# DYNAMIC DECISION ENGINE (NO RULES)
 # =========================
-def run_agents(tx):
-    result = ecosystem.evaluate_account(tx)
-    return result["risk_score"], result["rationale"]
+def route_decision(risk, memory):
+
+    recent = [m["risk"] for m in memory[-30:]] if len(memory) > 10 else [0.5]
+
+    center = np.mean(recent)
+    spread = np.std(recent) + 0.05
+
+    # adaptive policy (learned behavior proxy)
+    if risk > center + 1.5 * spread:
+        return "ESCALATE"
+
+    if risk > center + spread:
+        return "REVIEW"
+
+    return "ALLOW"
 
 # =========================
-# SELF-LEARNING FUNCTION (IMPORTANT)
+# SELF-HEALING LEARNER
 # =========================
-def retrain_if_needed(ecosystem, memory):
+def self_learn(ecosystem, memory):
 
     feedback = [m for m in memory if "label" in m]
 
-    if len(feedback) < 5:
+    if len(feedback) < 8:
         return
 
     X, y = [], []
 
-    for item in feedback:
-        tx = item["tx"]
-        label = item["label"]
-
-        X.append(list(tx.values()))
-
-        y.append(1 if label == "BLOCK" else 0)
-
-    X = np.array(X)
-    y = np.array(y)
+    for f in feedback:
+        X.append(list(f["tx"].values()))
+        y.append(1 if f["label"] == "BLOCK" else 0)
 
     ecosystem.main_agent.fit(
         pd.DataFrame(X, columns=FEATURES),
-        y
+        np.array(y)
     )
 
 # =========================
-# STREAM ENGINE (SAFE)
+# SOC LOOP (REAL TIME)
 # =========================
-if st.session_state.streaming:
+if st.session_state.running:
 
-    tx = generate_transaction()
-    risk, reasons = run_agents(tx)
+    st.session_state.step += 1
+    step = st.session_state.step
+
+    tx = generate_transaction(step)
+
+    result = ecosystem.evaluate_account(tx)
+    risk = float(result["risk_score"])
+
+    decision = route_decision(risk, memory)
 
     st.session_state.last_tx = tx
     st.session_state.last_risk = risk
 
-    # 🔥 ALERT CONDITION (DATA-DRIVEN, NOT RULE MODEL)
-    alert_risk = risk
+    # =========================
+    # REAL-TIME ALERT ENGINE
+    # =========================
+    alert = (decision != "ALLOW")
 
-    memory.append(clean_json({
+    memory.append(clean({
         "tx": tx,
-        "risk": float(risk),
-        "time": time.time(),
-        "alert": alert_risk > 0.6
+        "risk": risk,
+        "decision": decision,
+        "alert": alert,
+        "time": time.time()
     }))
 
     save_memory(memory)
 
-    # 🔁 SELF-HEALING TRIGGER
-    retrain_if_needed(ecosystem, memory)
+    # SELF-HEALING
+    self_learn(ecosystem, memory)
 
     time.sleep(1)
     st.rerun()
@@ -191,81 +200,75 @@ if st.session_state.streaming:
 # =========================
 # DASHBOARD
 # =========================
-st.subheader("📊 Live SOC Output")
+st.subheader("📊 LIVE SOC STATUS")
 
 if st.session_state.last_risk is not None:
 
     risk = st.session_state.last_risk
     tx = st.session_state.last_tx
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     col1.metric("Risk Score", f"{risk:.4f}")
+    col2.metric("Decision", route_decision(risk, memory))
 
-    if risk >= 0.75:
-        status = "🚨 HIGH RISK"
-    elif risk >= 0.45:
-        status = "⚠️ MEDIUM RISK"
+    if risk > 0.7:
+        col3.metric("Alert", "🚨 ACTIVE")
     else:
-        status = "✅ LOW RISK"
-
-    col2.metric("Status", status)
+        col3.metric("Alert", "OK")
 
     st.progress(float(risk))
 
     st.subheader("🧠 Agent Reasoning")
 
-    _, reasons = run_agents(tx)
+    _, reasons = ecosystem.evaluate_account(tx)
 
     for r in reasons:
         st.write("•", r)
 
 # =========================
-# HIGH RISK QUEUE
+# ESCALATION QUEUE (REAL SOC)
 # =========================
 st.divider()
-st.subheader("🚨 High Risk Queue")
+st.subheader("🚨 Escalation Queue (Human SOC Team)")
 
-high_risk = [m for m in memory if m.get("risk", 0) >= 0.75]
+escalations = [m for m in memory if m.get("decision") == "ESCALATE"]
 
-if high_risk:
-    st.dataframe(pd.DataFrame(high_risk))
+if escalations:
+    st.dataframe(pd.DataFrame(escalations))
 else:
-    st.info("No high-risk cases detected.")
+    st.info("No escalations yet.")
 
 # =========================
-# MEMORY LOG
+# MEMORY
 # =========================
 st.divider()
-st.subheader("📦 SOC Memory")
+st.subheader("📦 SOC Event Log")
 
 if memory:
     st.dataframe(pd.DataFrame(memory).tail(30))
 else:
-    st.info("No SOC activity yet.")
+    st.info("No SOC events yet.")
 
 # =========================
 # HUMAN FEEDBACK LOOP
 # =========================
 st.divider()
-st.subheader("👨‍💼 Human-in-the-Loop Feedback")
+st.subheader("👨‍💼 Human Feedback (Self-Healing)")
 
 if st.session_state.last_tx is not None:
 
-    feedback = st.selectbox(
-        "Correct label for last transaction",
-        ["ALLOW", "REVIEW", "BLOCK"]
-    )
+    label = st.selectbox("Correct label", ["ALLOW", "REVIEW", "BLOCK"])
 
     if st.button("Submit Feedback"):
 
-        memory.append(clean_json({
+        memory.append(clean({
             "tx": st.session_state.last_tx,
             "risk": float(st.session_state.last_risk),
-            "label": feedback,
+            "label": label,
             "time": time.time()
         }))
 
         save_memory(memory)
 
-        st.success("Feedback stored → model will self-update")
+        st.success("Feedback learned by system → self-healing triggered")
