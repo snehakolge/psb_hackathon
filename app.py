@@ -4,11 +4,8 @@ import pandas as pd
 import time
 
 # =========================================================
-# INIT STATE (CRITICAL FIX)
+# STATE INIT (CRITICAL FIX)
 # =========================================================
-if "running" not in st.session_state:
-    st.session_state.running = False
-
 if "tick" not in st.session_state:
     st.session_state.tick = 0
 
@@ -18,13 +15,16 @@ if "events" not in st.session_state:
 if "cases" not in st.session_state:
     st.session_state.cases = []
 
+if "running" not in st.session_state:
+    st.session_state.running = False
+
 if "feedback" not in st.session_state:
     st.session_state.feedback = []
 
 # =========================================================
-# UI HEADER
+# UI
 # =========================================================
-st.title("🏦 RBI AML + Fraud SOC (REAL-TIME AGENTIC STREAM)")
+st.title("🏦 RBI AML + Fraud SOC (Agentic Real-Time System)")
 
 col1, col2 = st.columns(2)
 
@@ -35,34 +35,34 @@ if col2.button("⛔ STOP STREAM"):
     st.session_state.running = False
 
 # =========================================================
-# AGENTIC RISK ENGINE (NOT RULES — SIMULATED ML BEHAVIOR)
+# AGENTIC SYSTEM (NO RULE SYSTEM - PROBABILISTIC BEHAVIOR)
 # =========================================================
 def agents(tx):
 
-    risk = 0.0
+    # simulate ML latent reasoning
+    base = np.random.rand()
+
+    amount_signal = min(tx["amount"] / 150000, 1.0)
+
+    drift_signal = np.random.normal(0.5, 0.2)
+
+    risk = (0.4 * base + 0.4 * amount_signal + 0.2 * drift_signal)
+
     reasons = []
 
-    # Agent 1: anomaly detection behavior
-    anomaly = np.random.rand()
+    if base > 0.7:
+        reasons.append("Behavioral Latent Pattern Shift")
 
-    if anomaly > 0.7:
-        risk += 0.35
-        reasons.append("Behavioral Anomaly Agent Triggered")
+    if amount_signal > 0.6:
+        reasons.append("High Value Transaction Cluster")
 
-    # Agent 2: amount intelligence
-    if tx["amount"] > np.random.normal(100000, 30000):
-        risk += 0.4
-        reasons.append("Statistical Amount Deviation Detected")
+    if drift_signal > 0.6:
+        reasons.append("Population Drift Signal Detected")
 
-    # Agent 3: drift intelligence
-    if np.random.rand() > 0.8:
-        risk += 0.25
-        reasons.append("Population Drift Detected")
-
-    return min(risk, 1.0), reasons
+    return float(np.clip(risk, 0, 1)), reasons
 
 # =========================================================
-# DECISION ENGINE (RBI STYLE ACTIONS)
+# DECISION ENGINE (RBI STYLE)
 # =========================================================
 def decision(risk):
 
@@ -72,22 +72,22 @@ def decision(risk):
         return "STR"
     elif risk > 0.3:
         return "REVIEW"
-    else:
-        return "ALLOW"
+    return "ALLOW"
 
 # =========================================================
-# TRANSACTION STREAM (FORCED CONTINUITY)
+# TRANSACTION GENERATOR (ENSURES STREAM NEVER STOPS)
 # =========================================================
 def generate_tx():
 
-    fraud_spike = np.random.rand() < 0.2
+    fraud_mode = np.random.rand() < 0.35
 
-    return {
-        "amount": np.random.normal(120000, 60000) if fraud_spike else np.random.normal(30000, 10000)
-    }
+    if fraud_mode:
+        return {"amount": np.random.normal(180000, 50000)}
+    else:
+        return {"amount": np.random.normal(40000, 15000)}
 
 # =========================================================
-# STREAM STEP
+# CORE ENGINE (ALWAYS RUNS WHEN STREAMING)
 # =========================================================
 def step():
 
@@ -108,37 +108,38 @@ def step():
     }
 
     st.session_state.events.insert(0, event)
+    st.session_state.events = st.session_state.events[:40]
 
     if action in ["REVIEW", "STR", "FREEZE"]:
         st.session_state.cases.insert(0, event)
-
-    st.session_state.events = st.session_state.events[:30]
-    st.session_state.cases = st.session_state.cases[:20]
+        st.session_state.cases = st.session_state.cases[:25]
 
 # =========================================================
-# FORCE STREAM LOOP (THIS IS THE FIX)
+# GUARANTEED STREAM EXECUTION
 # =========================================================
 if st.session_state.running:
 
     step()
-    time.sleep(0.7)
+
+    # IMPORTANT: forced rerun loop
+    time.sleep(0.5)
     st.rerun()
 
 # =========================================================
-# LIVE ALERT STREAM
+# LIVE ALERT STREAM (ALWAYS VISIBLE)
 # =========================================================
 st.subheader("🚨 LIVE SOC ALERT STREAM")
 
 if len(st.session_state.events) == 0:
-    st.warning("STREAM WARMING UP... WAITING FOR TRANSACTIONS")
+    st.warning("STREAM ACTIVE → generating AML intelligence signals...")
 
-for e in st.session_state.events[:10]:
+for e in st.session_state.events[:12]:
 
     if e["action"] == "FREEZE":
         st.error(f"🧊 FREEZE | Risk={e['risk']:.2f} | {e['reasons']}")
 
     elif e["action"] == "STR":
-        st.warning(f"📌 STR ALERT | Risk={e['risk']:.2f} | {e['reasons']}")
+        st.warning(f"📌 STR | Risk={e['risk']:.2f} | {e['reasons']}")
 
     elif e["action"] == "REVIEW":
         st.warning(f"⚠️ REVIEW | Risk={e['risk']:.2f} | {e['reasons']}")
@@ -162,26 +163,26 @@ else:
 st.subheader("📊 Regulatory Reporting (CTR / STR)")
 
 ctr = sum(1 for e in st.session_state.events if e["amount"] > 150000)
-str_count = sum(1 for e in st.session_state.events if e["action"] == "STR")
+str_count = len(st.session_state.cases)
 
-c1, c2 = st.columns(2)
-c1.metric("CTR COUNT", ctr)
-c2.metric("STR COUNT", str_count)
+col1, col2 = st.columns(2)
+col1.metric("CTR COUNT", ctr)
+col2.metric("STR COUNT", str_count)
 
 # =========================================================
-# HUMAN FEEDBACK LOOP
+# HUMAN FEEDBACK (SELF-HEALING SIGNAL)
 # =========================================================
-st.subheader("👨‍💼 Human Feedback")
+st.subheader("👨‍💼 Human Feedback Loop")
 
 if st.session_state.cases:
 
-    feedback_action = st.selectbox("Label last case", ["CONFIRM STR", "CONFIRM FREEZE", "FALSE POSITIVE"])
+    label = st.selectbox("Label Case", ["CONFIRMED FRAUD", "FALSE POSITIVE", "UNDER REVIEW"])
 
     if st.button("Submit Feedback"):
 
         st.session_state.feedback.append({
             "case": st.session_state.cases[0],
-            "label": feedback_action
+            "label": label
         })
 
-        st.success("Feedback learned by system (self-healing simulation)")
+        st.success("Feedback learned → model adapts (simulated self-healing)")
