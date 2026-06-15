@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import joblib
 import os
+import time
+import random
 
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
@@ -13,15 +15,15 @@ from scipy.stats import ks_2samp
 # APP CONFIG
 # =========================
 st.set_page_config(page_title="Fraud SOC", layout="wide")
-st.title("🏦 Fraud SOC (Agentic ML System)")
+st.title("🏦 Fraud SOC (Agentic ML + LIVE STREAM ENGINE)")
 
 # =========================
-# CREATE MODEL FOLDER
+# MODEL DIR
 # =========================
 os.makedirs("models", exist_ok=True)
 
 # =========================
-# SESSION STATE INIT
+# SESSION STATE
 # =========================
 def init_state():
     if "feedback_data" not in st.session_state:
@@ -34,7 +36,7 @@ def init_state():
 init_state()
 
 # =========================
-# TRAINING FUNCTION
+# TRAIN MODEL
 # =========================
 def train_models(df):
     X = df.drop(columns=["target"])
@@ -69,35 +71,31 @@ def get_feedback_df():
     return pd.DataFrame(st.session_state.feedback_data)
 
 # =========================
-# SELF-LEARNING (RETRAIN)
+# SELF LEARNING
 # =========================
 def update_model_with_feedback():
     df = get_feedback_df()
     if len(df) < 20:
-        return "Not enough feedback data"
+        return "Not enough feedback data (need 20+)"
 
     X = np.vstack(df["features"].values)
     y = df["label"].values
 
     model = joblib.load("models/xgb.pkl")
-
     model.fit(X, y)
-
     joblib.dump(model, "models/xgb.pkl")
 
     return "Model updated from feedback"
 
 # =========================
-# DRIFT DETECTION
+# DRIFT CHECK
 # =========================
 def check_drift(old_data, new_data):
     drift_score = 0
-
     for i in range(old_data.shape[1]):
         stat, p = ks_2samp(old_data[:, i], new_data[:, i])
         if p < 0.05:
             drift_score += 1
-
     return drift_score / old_data.shape[1]
 
 # =========================
@@ -113,59 +111,115 @@ def load_models():
 scaler, xgb = load_models()
 
 # =========================
-# SIDEBAR: TRAINING MODE
+# SIDEBAR TRAINING
 # =========================
 st.sidebar.header("⚙️ Model Controls")
 
-uploaded_file = st.sidebar.file_uploader("Upload Training Data (CSV)", type=["csv"])
+uploaded_file = st.sidebar.file_uploader("Upload Training CSV", type=["csv"])
 
 if st.sidebar.button("Train Model"):
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
-        msg = train_models(df)
-        st.sidebar.success(msg)
+        st.sidebar.success(train_models(df))
     else:
         st.sidebar.error("Upload dataset first")
 
 # =========================
-# INPUT SECTION
+# LIVE TRANSACTION GENERATOR
 # =========================
-st.subheader("🔍 Transaction Input")
+def generate_transaction():
+    return {
+        "amount": round(random.uniform(10, 50000), 2),
+        "velocity": round(random.uniform(0, 100), 2),
+        "balance": round(random.uniform(0, 200000), 2)
+    }
+
+# =========================
+# LIVE STREAM UI
+# =========================
+st.subheader("📡 LIVE SOC TRANSACTION STREAM")
+
+start_stream = st.toggle("Start Live Fraud Stream")
+
+placeholder = st.empty()
+
+# =========================
+# STATIC INPUT (OPTIONAL MANUAL TEST)
+# =========================
+st.subheader("🔍 Manual Transaction Test")
 
 amount = st.number_input("Amount", value=0.0)
 velocity = st.number_input("Velocity", value=0.0)
 balance = st.number_input("Balance", value=0.0)
 
-X = np.array([[amount, velocity, balance]])
+X_manual = np.array([[amount, velocity, balance]])
 
 # =========================
-# PREDICTION
+# MANUAL PREDICTION
 # =========================
 if scaler is not None and xgb is not None:
 
-    X_scaled = scaler.transform(X)
+    if st.button("Analyze Manual Transaction"):
 
-    if st.button("Analyze Transaction"):
-
+        X_scaled = scaler.transform(X_manual)
         prob = xgb.predict_proba(X_scaled)[0][1]
 
         st.metric("Fraud Score", round(prob, 4))
 
         if prob > 0.85:
-            st.error("BLOCK 🚨 HIGH RISK")
+            st.error("BLOCK 🚨")
         elif prob > 0.6:
-            st.warning("REVIEW ⚠️ MEDIUM RISK")
+            st.warning("REVIEW ⚠️")
         else:
-            st.success("SAFE ✅ LOW RISK")
+            st.success("SAFE ✅")
 
         st.session_state.last_pred = prob
         st.session_state.last_feat = X_scaled
 
 else:
-    st.warning("Please train/load model first")
+    st.warning("Train model first")
 
 # =========================
-# FEEDBACK UI
+# LIVE STREAM LOOP
+# =========================
+if start_stream and scaler is not None and xgb is not None:
+
+    for i in range(1000):
+
+        txn = generate_transaction()
+
+        X_live = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
+        X_scaled = scaler.transform(X_live)
+
+        prob = xgb.predict_proba(X_scaled)[0][1]
+
+        if prob > 0.85:
+            status = "BLOCK 🚨"
+            color = "🔴"
+        elif prob > 0.6:
+            status = "REVIEW ⚠️"
+            color = "🟠"
+        else:
+            status = "SAFE ✅"
+            color = "🟢"
+
+        with placeholder.container():
+
+            st.markdown("### 🔴 LIVE TRANSACTION")
+            st.write(txn)
+
+            st.metric("Fraud Score", round(prob, 4))
+            st.markdown(f"### Status: {color} {status}")
+
+            st.progress(min(prob, 1.0))
+
+        st.session_state.last_pred = prob
+        st.session_state.last_feat = X_scaled
+
+        time.sleep(1)
+
+# =========================
+# FEEDBACK SECTION
 # =========================
 st.subheader("🧠 Human Feedback Loop")
 
@@ -173,20 +227,23 @@ label = st.selectbox("Was prediction correct?", [0, 1])
 
 if st.button("Submit Feedback"):
     if st.session_state.last_feat is not None:
-        add_feedback(st.session_state.last_feat, st.session_state.last_pred, label)
+        add_feedback(
+            st.session_state.last_feat,
+            st.session_state.last_pred,
+            label
+        )
         st.success("Feedback stored")
     else:
-        st.error("No prediction available yet")
+        st.error("No prediction available")
 
 # =========================
 # RETRAIN FROM FEEDBACK
 # =========================
 if st.button("Retrain Model from Feedback"):
-    msg = update_model_with_feedback()
-    st.success(msg)
+    st.success(update_model_with_feedback())
 
 # =========================
-# FEEDBACK VIEW
+# FEEDBACK LOGS
 # =========================
 st.subheader("📊 Feedback Logs")
 
@@ -196,7 +253,7 @@ else:
     st.info("No feedback yet")
 
 # =========================
-# DRIFT CHECK DEMO (OPTIONAL)
+# DRIFT MONITOR
 # =========================
 st.subheader("📉 Drift Monitor")
 
