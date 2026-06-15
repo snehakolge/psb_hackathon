@@ -3,13 +3,13 @@ import random
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
+import time
 
 # =========================
-# PAGE CONFIG
+# PAGE
 # =========================
-st.set_page_config(page_title="SOC Autonomous Engine", layout="wide")
-st.title("🏦 SOC vNEXT (Autonomous Fraud + AML Intelligence System)")
+st.set_page_config(page_title="SOC AI Engine", layout="wide")
+st.title("🏦 SOC vNEXT (Autonomous AML + Fraud Intelligence)")
 
 # =========================
 # STATE INIT
@@ -24,8 +24,10 @@ def init():
         "ctr": [],
         "graph": {},
         "fraud_rate": 0.5,
-        "last_event": None
+        "last_event": None,
+        "feedback": []
     }
+
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -33,12 +35,12 @@ def init():
 init()
 
 # =========================
-# CONTROLS
+# CONTROL PANEL
 # =========================
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("▶ START LIVE SOC"):
+    if st.button("▶ START SOC STREAM"):
         st.session_state.running = True
 
 with col2:
@@ -46,58 +48,43 @@ with col2:
         st.session_state.running = False
 
 # =========================
-# AUTO REFRESH ENGINE
-# =========================
-if st.session_state.running:
-    st_autorefresh(interval=1200, key="soc_tick")
-
-    st.session_state.tick += 1
-
-# =========================
 # TRANSACTION GENERATOR
 # =========================
-def generate_txn():
+def gen_txn():
     r = random.random()
     acc = random.randint(1000, 1015)
 
-    if r < 0.25:
-        return {"account": acc, "amount": random.randint(300000, 900000),
+    if r < 0.3:
+        return {"account": acc, "amount": random.randint(250000, 900000),
                 "velocity": random.randint(120, 260),
                 "balance": random.randint(0, 15000),
                 "type": "MULE"}
 
-    if r < 0.5:
+    if r < 0.6:
         return {"account": acc, "amount": random.randint(80000, 250000),
                 "velocity": random.randint(60, 180),
                 "balance": random.randint(5000, 80000),
                 "type": "STRUCTURING"}
 
-    if r < 0.75:
-        return {"account": acc, "amount": random.randint(50000, 300000),
-                "velocity": random.randint(150, 280),
-                "balance": random.randint(0, 30000),
-                "type": "VELOCITY"}
-
-    return {"account": acc, "amount": random.randint(5000, 120000),
-            "velocity": random.randint(10, 80),
+    return {"account": acc, "amount": random.randint(5000, 200000),
+            "velocity": random.randint(10, 120),
             "balance": random.randint(50000, 600000),
             "type": "NORMAL"}
 
 # =========================
-# RISK ENGINE (SELF-HEALING)
+# RISK ENGINE
 # =========================
 def risk(txn):
-    base_ml = random.uniform(0.3, 0.7)
+    ml = random.uniform(0.3, 0.8)
 
-    weights = {
+    weight = {
         "MULE": 0.6,
-        "STRUCTURING": 0.45,
-        "VELOCITY": 0.4,
+        "STRUCTURING": 0.4,
         "NORMAL": 0.0
     }
 
-    final = 0.7 * base_ml + weights[txn["type"]]
-    return base_ml, final
+    final = 0.7 * ml + weight[txn["type"]]
+    return ml, final
 
 # =========================
 # DECISION ENGINE
@@ -110,7 +97,7 @@ def decision(score):
     return "SAFE"
 
 # =========================
-# STR / CTR RULES
+# RULES
 # =========================
 def is_str(e):
     return e["final"] > 0.75 and e["txn"]["amount"] > 200000
@@ -119,7 +106,7 @@ def is_ctr(e):
     return e["txn"]["amount"] > 200000
 
 # =========================
-# SELF LEARNING UPDATE
+# SELF HEALING
 # =========================
 def update_learning():
     total = len(st.session_state.alerts)
@@ -129,22 +116,10 @@ def update_learning():
         st.session_state.fraud_rate = fraud / total
 
 # =========================
-# GRAPH UPDATE
-# =========================
-def update_graph(txn, score):
-    acc = txn["account"]
-
-    if acc not in st.session_state.graph:
-        st.session_state.graph[acc] = {"txns": 0, "risk": 0}
-
-    st.session_state.graph[acc]["txns"] += 1
-    st.session_state.graph[acc]["risk"] += score
-
-# =========================
-# ENGINE STEP (1 TICK)
+# STEP ENGINE
 # =========================
 def step():
-    txn = generate_txn()
+    txn = gen_txn()
     ml, final = risk(txn)
     dec = decision(final)
 
@@ -171,14 +146,23 @@ def step():
     if is_ctr(event):
         st.session_state.ctr.append(event)
 
-    update_graph(txn, final)
+    # graph update
+    acc = txn["account"]
+    if acc not in st.session_state.graph:
+        st.session_state.graph[acc] = {"risk": 0, "txns": 0}
+
+    st.session_state.graph[acc]["risk"] += final
+    st.session_state.graph[acc]["txns"] += 1
+
     update_learning()
 
 # =========================
-# AUTO RUN ENGINE
+# AUTO LOOP (SAFE STREAMLIT WAY)
 # =========================
 if st.session_state.running:
     step()
+    time.sleep(1)
+    st.rerun()
 
 # =========================
 # DASHBOARD
@@ -198,8 +182,8 @@ if st.session_state.last_event:
 
     with c2:
         st.subheader("AI ENGINE")
-        st.metric("ML Score", round(e["ml"], 4))
-        st.metric("Final Score", round(e["final"], 4))
+        st.metric("ML", round(e["ml"], 4))
+        st.metric("FINAL", round(e["final"], 4))
         st.write(e["decision"])
 
     with c3:
@@ -215,21 +199,21 @@ if st.session_state.last_event:
 st.markdown("## 🚨 ALERTS")
 st.dataframe(pd.DataFrame(st.session_state.alerts))
 
-st.markdown("## 🚨 STR REPORTS")
+st.markdown("## 🚨 STR")
 st.dataframe(pd.DataFrame(st.session_state.str))
 
-st.markdown("## 📄 CTR REPORTS")
+st.markdown("## 📄 CTR")
 st.dataframe(pd.DataFrame(st.session_state.ctr))
 
 # =========================
-# FRAUD GRAPH (STABLE)
+# GRAPH
 # =========================
-st.markdown("## 🕸️ FRAUD RISK GRAPH")
+st.markdown("## 🕸️ FRAUD GRAPH")
 
-if len(st.session_state.graph) > 0:
-    df = pd.DataFrame.from_dict(st.session_state.graph, orient="index")
+df = pd.DataFrame.from_dict(st.session_state.graph, orient="index")
 
-    st.bar_chart(df[["risk"]])
-    st.line_chart(df[["txns"]])
+if len(df) > 0:
+    st.bar_chart(df["risk"])
+    st.line_chart(df["txns"])
 else:
-    st.info("Graph will build after stream starts.")
+    st.info("Graph building after stream starts.")
