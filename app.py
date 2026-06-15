@@ -4,15 +4,17 @@ import random
 import time
 import joblib
 import os
+from datetime import datetime
 
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
-st.title("🏦 Agentic Fraud SOC (Live Streaming + Intelligence Engine)")
+st.set_page_config(page_title="SOC Dashboard", layout="wide")
+
+st.title("🏦 Agentic Fraud SOC (Production Dashboard)")
 
 # =========================
-# SESSION STATE
+# STATE
 # =========================
 if "running" not in st.session_state:
     st.session_state.running = False
@@ -26,55 +28,42 @@ if "str_reports" not in st.session_state:
 if "ctr_reports" not in st.session_state:
     st.session_state.ctr_reports = []
 
-if "feedback" not in st.session_state:
-    st.session_state.feedback = []
-
-if "drift_scores" not in st.session_state:
-    st.session_state.drift_scores = []
+if "case_id" not in st.session_state:
+    st.session_state.case_id = 1000
 
 # =========================
-# LOAD MODEL SAFELY
+# MODEL LOAD
 # =========================
 MODEL_PATH = "models/fraud_ensemble.pkl"
 
 bundle = None
 if os.path.exists(MODEL_PATH):
     bundle = joblib.load(MODEL_PATH)
-else:
-    st.warning("⚠️ Model not found. Please upload/train fraud_ensemble.pkl")
 
 # =========================
-# CONTROL PANEL (START LEFT)
+# SIDEBAR CONTROL PANEL
 # =========================
-col1, col2 = st.columns(2)
+st.sidebar.header("⚙️ SOC Controls")
 
-with col1:
-    if st.button("▶️ Start Stream"):
-        st.session_state.running = True
+if st.sidebar.button("▶️ Start SOC"):
+    st.session_state.running = True
 
-with col2:
-    if st.button("⛔ Stop Stream"):
-        st.session_state.running = False
+if st.sidebar.button("⛔ Stop SOC"):
+    st.session_state.running = False
+
+st.sidebar.metric("Active Alerts", len(st.session_state.alerts))
+st.sidebar.metric("STR Reports", len(st.session_state.str_reports))
+st.sidebar.metric("CTR Reports", len(st.session_state.ctr_reports))
 
 # =========================
 # TRANSACTION GENERATOR
 # =========================
 def generate_txn():
     return {
-        "amount": random.randint(100, 900000),
+        "amount": random.randint(50000, 900000),
         "velocity": random.randint(0, 200),
         "balance": random.randint(0, 300000)
     }
-
-# =========================
-# AGENT LOGIC
-# =========================
-def rule_signals(txn):
-    return (
-        (txn["amount"] > 500000) +
-        (txn["velocity"] > 120) +
-        (txn["balance"] < 5000)
-    )
 
 # =========================
 # SCORING ENGINE
@@ -94,29 +83,27 @@ def score(txn):
     else:
         ml_score = 0.5
 
-    rule_score = rule_signals(txn) / 3
+    rule_score = (
+        (txn["amount"] > 300000) +
+        (txn["velocity"] > 120) +
+        (txn["balance"] < 5000)
+    ) / 3
 
     final_score = 0.6 * ml_score + 0.4 * rule_score
 
-    if final_score > 0.75:
-        decision = "BLOCK 🚨"
-    elif final_score > 0.5:
-        decision = "REVIEW ⚠️"
+    if final_score > 0.65:
+        decision = "BLOCK"
+    elif final_score > 0.45:
+        decision = "REVIEW"
     else:
-        decision = "SAFE ✅"
+        decision = "SAFE"
 
     return ml_score, final_score, decision
 
 # =========================
-# DRIFT MONITOR
+# UI LAYOUT (3 PANELS)
 # =========================
-def drift_monitor(value):
-    st.session_state.drift_scores.append(value)
-
-    if len(st.session_state.drift_scores) > 50:
-        st.session_state.drift_scores.pop(0)
-
-    return np.std(st.session_state.drift_scores) if st.session_state.drift_scores else 0
+col1, col2, col3 = st.columns([2, 2, 2])
 
 # =========================
 # LIVE ENGINE
@@ -128,83 +115,96 @@ if st.session_state.running:
     txn = generate_txn()
     ml_score, final_score, decision = score(txn)
 
-    drift = drift_monitor(final_score)
+    st.session_state.case_id += 1
+    case_id = f"FRAUD-{st.session_state.case_id}"
 
     event = {
+        "case_id": case_id,
+        "time": datetime.now().strftime("%H:%M:%S"),
         "txn": txn,
         "ml_score": ml_score,
         "final_score": final_score,
-        "decision": decision,
-        "drift": drift
+        "decision": decision
     }
 
     # =========================
-    # STORE ALERTS
+    # ALERT LOGIC
     # =========================
-    if decision != "SAFE ✅":
+    if decision != "SAFE":
         st.session_state.alerts.append(event)
 
-    # STR RULE
-    if final_score > 0.8:
+    if final_score > 0.65:
         st.session_state.str_reports.append(event)
 
-    # CTR RULE
-    if txn["amount"] > 750000:
+    if txn["amount"] > 300000:
         st.session_state.ctr_reports.append(event)
 
+    # limit size
+    st.session_state.alerts = st.session_state.alerts[-20:]
+    st.session_state.str_reports = st.session_state.str_reports[-20:]
+    st.session_state.ctr_reports = st.session_state.ctr_reports[-20:]
+
     # =========================
-    # UI LIVE FEED
+    # DASHBOARD UI
     # =========================
     with placeholder.container():
 
-        st.subheader("🔴 LIVE TRANSACTION STREAM")
-        st.json(txn)
+        col1, col2, col3 = st.columns(3)
 
-        st.metric("ML Score", round(ml_score, 4))
-        st.metric("Final Risk Score", round(final_score, 4))
-        st.write("Decision:", decision)
+        with col1:
+            st.subheader("🔴 LIVE TRANSACTION")
+            st.json(txn)
+            st.write("🆔 Case:", case_id)
 
-        if drift > 1.5:
-            st.error(f"📉 DRIFT DETECTED: {round(drift, 3)}")
-        else:
-            st.success(f"📊 Stable System: {round(drift, 3)}")
+        with col2:
+            st.subheader("📊 RISK SCORES")
+            st.metric("ML Score", round(ml_score, 4))
+            st.metric("Final Score", round(final_score, 4))
+
+        with col3:
+            st.subheader("🚨 DECISION")
+
+            if decision == "BLOCK":
+                st.error("🚨 BLOCKED TRANSACTION")
+            elif decision == "REVIEW":
+                st.warning("⚠️ NEEDS REVIEW")
+            else:
+                st.success("✅ SAFE")
 
     time.sleep(1)
     st.rerun()
 
 # =========================
-# SOC ALERT QUEUE
+# SOC SECTIONS (BELOW DASHBOARD)
 # =========================
-st.subheader("🚨 SOC ALERT QUEUE")
 
-for a in st.session_state.alerts[-10:][::-1]:
-    st.json(a)
+st.markdown("---")
+
+colA, colB, colC = st.columns(3)
+
+# =========================
+# ALERT QUEUE
+# =========================
+with colA:
+    st.subheader("🚨 SOC ALERT QUEUE")
+
+    for a in reversed(st.session_state.alerts[-10:]):
+        st.error(f"{a['case_id']} | {a['decision']} | {a['time']}")
 
 # =========================
 # STR REPORTS
 # =========================
-st.subheader("🚨 STR REPORTS (Suspicious Transaction Reports)")
+with colB:
+    st.subheader("🚨 STR REPORTS")
 
-for s in st.session_state.str_reports[-10:][::-1]:
-    st.json(s)
+    for s in reversed(st.session_state.str_reports[-10:]):
+        st.warning(f"{s['case_id']} | SCORE: {round(s['final_score'],2)}")
 
 # =========================
 # CTR REPORTS
 # =========================
-st.subheader("📄 CTR REPORTS (Cash Transaction Reports)")
+with colC:
+    st.subheader("📄 CTR REPORTS")
 
-for c in st.session_state.ctr_reports[-10:][::-1]:
-    st.json(c)
-
-# =========================
-# HUMAN FEEDBACK LOOP
-# =========================
-st.subheader("🧠 Human-in-the-Loop Feedback")
-
-label = st.selectbox("Was prediction correct?", [0, 1])
-
-if st.button("Submit Feedback"):
-    st.session_state.feedback.append(label)
-    st.success("Feedback recorded")
-
-st.write("Total feedback:", len(st.session_state.feedback))
+    for c in reversed(st.session_state.ctr_reports[-10:]):
+        st.info(f"{c['case_id']} | AMOUNT: {c['txn']['amount']}")
