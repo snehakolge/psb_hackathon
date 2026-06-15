@@ -7,62 +7,67 @@ import os
 from datetime import datetime
 
 # =========================
-# CONFIG
+# PAGE CONFIG
 # =========================
-st.set_page_config(page_title="SOC Dashboard", layout="wide")
+st.set_page_config(page_title="Enterprise SOC", layout="wide")
 
-st.title("🏦 Agentic Fraud SOC (Production Dashboard)")
-
-# =========================
-# STATE
-# =========================
-if "running" not in st.session_state:
-    st.session_state.running = False
-
-if "alerts" not in st.session_state:
-    st.session_state.alerts = []
-
-if "str_reports" not in st.session_state:
-    st.session_state.str_reports = []
-
-if "ctr_reports" not in st.session_state:
-    st.session_state.ctr_reports = []
-
-if "case_id" not in st.session_state:
-    st.session_state.case_id = 1000
+st.title("🏦 Enterprise Fraud SOC (AI + Real-Time Intelligence Engine)")
 
 # =========================
-# MODEL LOAD
+# STATE INIT
+# =========================
+for key in ["running", "alerts", "str_reports", "ctr_reports", "feedback", "case_id"]:
+    if key not in st.session_state:
+        st.session_state[key] = [] if key != "running" else False
+
+if "case_counter" not in st.session_state:
+    st.session_state.case_counter = 1000
+
+# =========================
+# LOAD MODEL
 # =========================
 MODEL_PATH = "models/fraud_ensemble.pkl"
 
-bundle = None
-if os.path.exists(MODEL_PATH):
-    bundle = joblib.load(MODEL_PATH)
+bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
 # =========================
-# SIDEBAR CONTROL PANEL
+# SIDEBAR (SOC CONTROL CENTER)
 # =========================
-st.sidebar.header("⚙️ SOC Controls")
+st.sidebar.header("⚙️ SOC CONTROL CENTER")
 
-if st.sidebar.button("▶️ Start SOC"):
+if st.sidebar.button("▶ START SOC ENGINE"):
     st.session_state.running = True
 
-if st.sidebar.button("⛔ Stop SOC"):
+if st.sidebar.button("⛔ STOP ENGINE"):
     st.session_state.running = False
 
-st.sidebar.metric("Active Alerts", len(st.session_state.alerts))
-st.sidebar.metric("STR Reports", len(st.session_state.str_reports))
-st.sidebar.metric("CTR Reports", len(st.session_state.ctr_reports))
+st.sidebar.metric("🚨 Active Alerts", len(st.session_state.alerts))
+st.sidebar.metric("📄 STR Reports", len(st.session_state.str_reports))
+st.sidebar.metric("📊 CTR Reports", len(st.session_state.ctr_reports))
+
+st.sidebar.markdown("---")
+st.sidebar.caption("AI SOC v3.0 | RBI Compliance Simulation")
+
+# =========================
+# METRICS HEADER (SOC HEALTH)
+# =========================
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("System Status", "🟢 ACTIVE" if st.session_state.running else "🔴 STOPPED")
+col2.metric("Alert Queue", len(st.session_state.alerts))
+col3.metric("STR Queue", len(st.session_state.str_reports))
+col4.metric("CTR Queue", len(st.session_state.ctr_reports))
+
+st.markdown("---")
 
 # =========================
 # TRANSACTION GENERATOR
 # =========================
 def generate_txn():
     return {
-        "amount": random.randint(50000, 900000),
-        "velocity": random.randint(0, 200),
-        "balance": random.randint(0, 300000)
+        "amount": random.randint(10000, 950000),
+        "velocity": random.randint(0, 220),
+        "balance": random.randint(0, 500000)
     }
 
 # =========================
@@ -81,19 +86,19 @@ def score(txn):
 
         ml_score = 0.55 * p1 + 0.45 * p2
     else:
-        ml_score = 0.5
+        ml_score = 0.52
 
     rule_score = (
         (txn["amount"] > 300000) +
-        (txn["velocity"] > 120) +
-        (txn["balance"] < 5000)
+        (txn["velocity"] > 150) +
+        (txn["balance"] < 10000)
     ) / 3
 
-    final_score = 0.6 * ml_score + 0.4 * rule_score
+    final_score = 0.65 * ml_score + 0.35 * rule_score
 
-    if final_score > 0.65:
+    if final_score > 0.7:
         decision = "BLOCK"
-    elif final_score > 0.45:
+    elif final_score > 0.5:
         decision = "REVIEW"
     else:
         decision = "SAFE"
@@ -101,12 +106,14 @@ def score(txn):
     return ml_score, final_score, decision
 
 # =========================
-# UI LAYOUT (3 PANELS)
+# CASE ID
 # =========================
-col1, col2, col3 = st.columns([2, 2, 2])
+def new_case():
+    st.session_state.case_counter += 1
+    return f"CASE-{st.session_state.case_counter}"
 
 # =========================
-# LIVE ENGINE
+# MAIN STREAM
 # =========================
 placeholder = st.empty()
 
@@ -115,12 +122,12 @@ if st.session_state.running:
     txn = generate_txn()
     ml_score, final_score, decision = score(txn)
 
-    st.session_state.case_id += 1
-    case_id = f"FRAUD-{st.session_state.case_id}"
+    case_id = new_case()
+    timestamp = datetime.now().strftime("%H:%M:%S")
 
     event = {
         "case_id": case_id,
-        "time": datetime.now().strftime("%H:%M:%S"),
+        "time": timestamp,
         "txn": txn,
         "ml_score": ml_score,
         "final_score": final_score,
@@ -128,83 +135,127 @@ if st.session_state.running:
     }
 
     # =========================
-    # ALERT LOGIC
+    # SOC LOGIC ENGINE
     # =========================
     if decision != "SAFE":
         st.session_state.alerts.append(event)
 
-    if final_score > 0.65:
+    if final_score > 0.7:
         st.session_state.str_reports.append(event)
 
-    if txn["amount"] > 300000:
+    if txn["amount"] > 250000:
         st.session_state.ctr_reports.append(event)
 
-    # limit size
-    st.session_state.alerts = st.session_state.alerts[-20:]
-    st.session_state.str_reports = st.session_state.str_reports[-20:]
-    st.session_state.ctr_reports = st.session_state.ctr_reports[-20:]
+    # LIMIT MEMORY
+    st.session_state.alerts = st.session_state.alerts[-25:]
+    st.session_state.str_reports = st.session_state.str_reports[-25:]
+    st.session_state.ctr_reports = st.session_state.ctr_reports[-25:]
 
     # =========================
-    # DASHBOARD UI
+    # UI DASHBOARD (REAL SOC STYLE)
     # =========================
     with placeholder.container():
 
-        col1, col2, col3 = st.columns(3)
+        c1, c2, c3 = st.columns([1.5, 1.5, 1])
 
-        with col1:
-            st.subheader("🔴 LIVE TRANSACTION")
+        # -------------------------
+        # TRANSACTION PANEL
+        # -------------------------
+        with c1:
+            st.subheader("🔴 LIVE TRANSACTION FEED")
+
+            st.markdown(f"""
+            **Case ID:** `{case_id}`  
+            **Time:** {timestamp}  
+            """)
+
             st.json(txn)
-            st.write("🆔 Case:", case_id)
 
-        with col2:
-            st.subheader("📊 RISK SCORES")
-            st.metric("ML Score", round(ml_score, 4))
-            st.metric("Final Score", round(final_score, 4))
+        # -------------------------
+        # RISK ENGINE PANEL
+        # -------------------------
+        with c2:
+            st.subheader("🧠 AI RISK ENGINE")
 
-        with col3:
-            st.subheader("🚨 DECISION")
+            st.metric("ML Probability", round(ml_score, 4))
+            st.metric("Final Risk Score", round(final_score, 4))
+
+            st.markdown("### Decision Engine")
 
             if decision == "BLOCK":
-                st.error("🚨 BLOCKED TRANSACTION")
+                st.error("🚨 BLOCKED - HIGH RISK DETECTED")
             elif decision == "REVIEW":
-                st.warning("⚠️ NEEDS REVIEW")
+                st.warning("⚠️ UNDER REVIEW")
             else:
-                st.success("✅ SAFE")
+                st.success("✅ LOW RISK")
+
+            st.markdown("### Agent Reasoning")
+            st.write(
+                "- Velocity anomaly detected" if txn["velocity"] > 150 else "- Normal velocity"
+            )
+            st.write(
+                "- High transaction amount" if txn["amount"] > 300000 else "- Normal amount behavior"
+            )
+
+        # -------------------------
+        # SOC HEALTH PANEL
+        # -------------------------
+        with c3:
+            st.subheader("📊 SOC HEALTH")
+
+            st.metric("Alerts", len(st.session_state.alerts))
+            st.metric("STR", len(st.session_state.str_reports))
+            st.metric("CTR", len(st.session_state.ctr_reports))
+
+            drift = np.std([e["final_score"] for e in st.session_state.alerts[-20:]]) if st.session_state.alerts else 0
+
+            if drift > 0.2:
+                st.error(f"📉 DRIFT ALERT: {round(drift,3)}")
+            else:
+                st.success(f"📈 STABLE: {round(drift,3)}")
 
     time.sleep(1)
     st.rerun()
 
 # =========================
-# SOC SECTIONS (BELOW DASHBOARD)
+# SOC LOG TABLES
 # =========================
-
 st.markdown("---")
 
 colA, colB, colC = st.columns(3)
 
 # =========================
-# ALERT QUEUE
+# ALERTS
 # =========================
 with colA:
     st.subheader("🚨 SOC ALERT QUEUE")
 
-    for a in reversed(st.session_state.alerts[-10:]):
-        st.error(f"{a['case_id']} | {a['decision']} | {a['time']}")
+    if not st.session_state.alerts:
+        st.info("No alerts yet")
+    else:
+        for a in reversed(st.session_state.alerts[-10:]):
+            st.error(f"{a['case_id']} | {a['decision']} | {a['time']}")
 
 # =========================
-# STR REPORTS
+# STR
 # =========================
 with colB:
-    st.subheader("🚨 STR REPORTS")
+    st.subheader("📄 STR REPORTS")
 
-    for s in reversed(st.session_state.str_reports[-10:]):
-        st.warning(f"{s['case_id']} | SCORE: {round(s['final_score'],2)}")
+    if not st.session_state.str_reports:
+        st.info("No STR generated")
+    else:
+        for s in reversed(st.session_state.str_reports[-10:]):
+            st.warning(f"{s['case_id']} | SCORE: {round(s['final_score'],2)}")
 
 # =========================
-# CTR REPORTS
+# CTR
 # =========================
 with colC:
-    st.subheader("📄 CTR REPORTS")
+    st.subheader("📊 CTR REPORTS")
 
-    for c in reversed(st.session_state.ctr_reports[-10:]):
-        st.info(f"{c['case_id']} | AMOUNT: {c['txn']['amount']}")
+    if not st.session_state.ctr_reports:
+        st.info("No CTR generated")
+    else:
+        for c in reversed(st.session_state.ctr_reports[-10:]):
+            st.info(f"{c['case_id']} | AMOUNT: {c['txn']['amount']}")
