@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import random
-import time
 import joblib
 import os
 import pandas as pd
@@ -10,22 +9,21 @@ from datetime import datetime
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="SOC v10.4 Stable Engine", layout="wide")
-st.title("🏦 SOC v10.4 (Bank-Grade Fraud + AML Intelligence System)")
+st.set_page_config(page_title="SOC v11 Stable Engine", layout="wide")
+st.title("🏦 SOC v11 (Production Fraud + AML Intelligence System)")
 
 # =========================
 # STATE INIT (HARD SAFE)
 # =========================
 def init_state():
     defaults = {
-        "running": False,
         "history": [],
         "alerts": [],
         "str": [],
         "ctr": [],
         "graph": {},
-        "audit": [],
-        "case_id": 1000
+        "case_id": 1000,
+        "last_event": None
     }
 
     for k, v in defaults.items():
@@ -35,40 +33,25 @@ def init_state():
 init_state()
 
 # =========================
-# SAFE APPEND (CRITICAL FIX)
+# SAFE APPEND
 # =========================
 def safe_append(key, value):
-    if key not in st.session_state or st.session_state[key] is None:
+    if key not in st.session_state:
         st.session_state[key] = []
     st.session_state[key].append(value)
 
 # =========================
-# LOAD MODEL (OPTIONAL)
+# MODEL LOAD (optional)
 # =========================
 MODEL_PATH = "models/fraud_ensemble.pkl"
 bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
 # =========================
-# SIDEBAR
-# =========================
-st.sidebar.header("⚙️ SOC CONTROL PANEL")
-
-if st.sidebar.button("▶ START STREAM"):
-    st.session_state.running = True
-
-if st.sidebar.button("⛔ STOP STREAM"):
-    st.session_state.running = False
-
-st.sidebar.metric("Alerts", len(st.session_state.alerts))
-st.sidebar.metric("STR", len(st.session_state.str))
-st.sidebar.metric("CTR", len(st.session_state.ctr))
-
-# =========================
-# TRANSACTION STREAM
+# TRANSACTION GENERATOR
 # =========================
 def generate_txn():
     r = random.random()
-    acc = random.randint(1000, 1012)
+    acc = random.randint(1000, 1015)
 
     if r < 0.25:
         return {"account": acc, "amount": random.randint(300000, 900000),
@@ -101,21 +84,13 @@ def ml_score(txn):
         return 0.5
 
     X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
-
     xgb = bundle["xgb_model"]
     lgbm = bundle["lgbm_model"]
 
     return 0.55 * xgb.predict_proba(X)[0][1] + 0.45 * lgbm.predict_proba(X)[0][1]
 
 # =========================
-# CASE GENERATOR
-# =========================
-def new_case():
-    st.session_state.case_id += 1
-    return f"CASE-{st.session_state.case_id}"
-
-# =========================
-# RISK ENGINE (SINGLE TRUTH)
+# RISK ENGINE (single truth)
 # =========================
 def risk_engine(txn, history):
 
@@ -127,13 +102,13 @@ def risk_engine(txn, history):
     else:
         avg_amt, avg_vel = txn["amount"], txn["velocity"]
 
-    anomaly_score = (
+    anomaly = (
         txn["amount"] > 2.5 * avg_amt,
         txn["velocity"] > 2 * avg_vel,
         txn["balance"] < 5000
     )
 
-    anomaly_score = sum(anomaly_score) / 3
+    anomaly_score = sum(anomaly) / 3
 
     attack_map = {
         "MULE": 0.55,
@@ -149,7 +124,7 @@ def risk_engine(txn, history):
 # =========================
 # DECISION ENGINE
 # =========================
-def decision_engine(score):
+def decision(score):
     if score >= 0.80:
         return "BLOCK"
     if score >= 0.60:
@@ -157,7 +132,7 @@ def decision_engine(score):
     return "SAFE"
 
 # =========================
-# EXPLANATION (CONSISTENT)
+# EXPLAIN (NO CONTRADICTION)
 # =========================
 def explain(txn, score):
 
@@ -165,10 +140,10 @@ def explain(txn, score):
         return ["CRITICAL FRAUD DETECTED"]
 
     if score >= 0.60:
-        return ["HIGH RISK TRANSACTION", "Behavior anomaly detected"]
+        return ["HIGH RISK TRANSACTION"]
 
-    if score >= 0.40:
-        return ["SUSPICIOUS PATTERN"]
+    if txn["type"] != "NORMAL":
+        return [f"{txn['type']} pattern observed"]
 
     return ["NORMAL TRANSACTION"]
 
@@ -176,11 +151,7 @@ def explain(txn, score):
 # STR RULE
 # =========================
 def is_str(event):
-    return (
-        event["final"] >= 0.75 and
-        event["txn"]["amount"] >= 200000 and
-        event["txn"]["velocity"] >= 100
-    )
+    return event["final"] >= 0.75 and event["txn"]["amount"] >= 200000
 
 # =========================
 # CTR RULE
@@ -189,14 +160,11 @@ def is_ctr(event):
     return event["txn"]["amount"] >= 200000
 
 # =========================
-# FRAUD GRAPH (STABLE)
+# GRAPH UPDATE (ROBUST)
 # =========================
 def update_graph(txn, score):
 
     acc = str(txn["account"])
-
-    if "graph" not in st.session_state:
-        st.session_state.graph = {}
 
     if acc not in st.session_state.graph:
         st.session_state.graph[acc] = {"txns": 0, "risk_hits": 0}
@@ -207,120 +175,99 @@ def update_graph(txn, score):
         st.session_state.graph[acc]["risk_hits"] += 1
 
 # =========================
-# STREAM LOOP
+# UI CONTROLS
 # =========================
-placeholder = st.empty()
+colA, colB = st.columns(2)
 
-if st.session_state.running:
+with colA:
+    if st.button("▶ GENERATE NEXT TRANSACTION"):
+        txn = generate_txn()
 
-    txn = generate_txn()
-    ml, final = risk_engine(txn, st.session_state.history)
-    decision = decision_engine(final)
+        ml, final = risk_engine(txn, st.session_state.history)
+        dec = decision(final)
 
-    case = new_case()
-    now = datetime.now().strftime("%H:%M:%S")
+        case = st.session_state.case_id
+        st.session_state.case_id += 1
 
-    event = {
-        "case": case,
-        "time": now,
-        "txn": txn,
-        "ml": ml,
-        "final": final,
-        "decision": decision
-    }
+        event = {
+            "case": f"CASE-{case}",
+            "txn": txn,
+            "ml": ml,
+            "final": final,
+            "decision": dec,
+            "time": datetime.now().strftime("%H:%M:%S")
+        }
 
-    # HISTORY
-    st.session_state.history.append(event)
-    st.session_state.history = st.session_state.history[-100:]
-    st.session_state.audit.append(event)
+        st.session_state.last_event = event
+        st.session_state.history.append(event)
 
-    # GRAPH
-    update_graph(txn, final)
+        update_graph(txn, final)
 
-    # ALERTS
-    if decision != "SAFE":
-        st.session_state.alerts.append(event)
+        if dec != "SAFE":
+            safe_append("alerts", event)
 
-    # STR / CTR (SAFE PERSISTENCE)
-    if is_str(event):
-        safe_append("str", {
-            "case": case,
-            "time": now,
-            "amount": txn["amount"],
-            "velocity": txn["velocity"],
-            "score": final,
-            "type": txn["type"]
-        })
+        if is_str(event):
+            safe_append("str", event)
 
-    if is_ctr(event):
-        safe_append("ctr", {
-            "case": case,
-            "time": now,
-            "amount": txn["amount"]
-        })
-
-    # =========================
-    # UI STREAM
-    # =========================
-    with placeholder.container():
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-            st.subheader("🔴 LIVE TRANSACTION")
-            st.json(txn)
-            st.write("Case:", case)
-
-        with c2:
-            st.subheader("🧠 AML ENGINE")
-            st.metric("ML Score", round(ml, 4))
-            st.metric("Final Score", round(final, 4))
-            st.write("Decision:", decision)
-
-            st.subheader("📌 Reasoning")
-            for r in explain(txn, final):
-                st.write("•", r)
-
-        with c3:
-            st.subheader("📊 SOC METRICS")
-            st.metric("Alerts", len(st.session_state.alerts))
-            st.metric("STR", len(st.session_state.str))
-            st.metric("CTR", len(st.session_state.ctr))
-
-    time.sleep(1)
-    st.rerun()
+        if is_ctr(event):
+            safe_append("ctr", event)
 
 # =========================
-# TABLES (SAFE DISPLAY)
+# DASHBOARD
 # =========================
 st.markdown("---")
 
-col1, col2, col3 = st.columns(3)
+if st.session_state.last_event:
 
-with col1:
-    st.subheader("🚨 ALERTS")
-    st.dataframe(pd.DataFrame(st.session_state.alerts[-10:]))
+    e = st.session_state.last_event
 
-with col2:
-    st.subheader("🚨 STR REPORTS")
-    st.dataframe(pd.DataFrame(st.session_state.str))
+    c1, c2, c3 = st.columns(3)
 
-with col3:
-    st.subheader("📄 CTR REPORTS")
-    st.dataframe(pd.DataFrame(st.session_state.ctr))
+    with c1:
+        st.subheader("🔴 LIVE TXN")
+        st.json(e["txn"])
+        st.write(e["case"])
+
+    with c2:
+        st.subheader("🧠 AML ENGINE")
+        st.metric("ML Score", round(e["ml"], 4))
+        st.metric("Final Score", round(e["final"], 4))
+        st.write("Decision:", e["decision"])
+
+        st.subheader("📌 Reasoning")
+        for r in explain(e["txn"], e["final"]):
+            st.write("•", r)
+
+    with c3:
+        st.subheader("📊 SOC METRICS")
+        st.metric("Alerts", len(st.session_state.alerts))
+        st.metric("STR", len(st.session_state.str))
+        st.metric("CTR", len(st.session_state.ctr))
 
 # =========================
-# FRAUD GRAPH (FIXED DISPLAY)
+# TABLES
 # =========================
-st.subheader("🕸️ FRAUD NETWORK GRAPH")
+st.markdown("## 🚨 ALERTS")
+st.dataframe(pd.DataFrame(st.session_state.alerts))
+
+st.markdown("## 🚨 STR REPORTS")
+st.dataframe(pd.DataFrame(st.session_state.str))
+
+st.markdown("## 📄 CTR REPORTS")
+st.dataframe(pd.DataFrame(st.session_state.ctr))
+
+# =========================
+# GRAPH (FIXED)
+# =========================
+st.markdown("## 🕸️ FRAUD GRAPH")
 st.dataframe(pd.DataFrame.from_dict(st.session_state.graph, orient="index"))
 
 # =========================
-# RBI EXPORT
+# EXPORT
 # =========================
-st.subheader("📥 RBI COMPLIANCE EXPORT")
+st.markdown("## 📥 RBI EXPORT")
 
-def to_csv(data):
+def export(data):
     if len(data) == 0:
         return None
     return pd.DataFrame(data).to_csv(index=False).encode("utf-8")
@@ -328,11 +275,11 @@ def to_csv(data):
 col1, col2 = st.columns(2)
 
 with col1:
-    ctr_csv = to_csv(st.session_state.ctr)
-    if ctr_csv:
-        st.download_button("Download CTR (RBI Format)", ctr_csv, "ctr.csv", "text/csv")
+    ctr = export(st.session_state.ctr)
+    if ctr:
+        st.download_button("Download CTR", ctr, "ctr.csv")
 
 with col2:
-    str_csv = to_csv(st.session_state.str)
-    if str_csv:
-        st.download_button("Download STR (RBI Format)", str_csv, "str.csv", "text/csv")
+    strr = export(st.session_state.str)
+    if strr:
+        st.download_button("Download STR", strr, "str.csv")
