@@ -6,84 +6,45 @@ import joblib
 import os
 
 # =========================
-# PAGE CONFIG
+# CONFIG
 # =========================
-st.set_page_config(page_title="Fraud SOC", layout="wide")
-st.title("🏦 Agentic Fraud SOC (LIVE STREAM DEMO)")
+st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
+st.title("🏦 Agentic Fraud SOC (Live Streaming + Intelligence Engine)")
 
 # =========================
-# STATE
+# SESSION STATE
 # =========================
 if "running" not in st.session_state:
     st.session_state.running = False
 
-if "queue" not in st.session_state:
-    st.session_state.queue = []
+if "alerts" not in st.session_state:
+    st.session_state.alerts = []
 
-if "str" not in st.session_state:
-    st.session_state.str = []
+if "str_reports" not in st.session_state:
+    st.session_state.str_reports = []
 
-if "ctr" not in st.session_state:
-    st.session_state.ctr = []
+if "ctr_reports" not in st.session_state:
+    st.session_state.ctr_reports = []
 
-if "last" not in st.session_state:
-    st.session_state.last = None
+if "feedback" not in st.session_state:
+    st.session_state.feedback = []
 
-# =========================
-# LOAD MODEL
-# =========================
-def load_model():
-    try:
-        scaler = joblib.load("models/scaler.pkl")
-        model = joblib.load("models/xgb.pkl")
-        return scaler, model
-    except:
-        return None, None
-
-scaler, model = load_model()
+if "drift_scores" not in st.session_state:
+    st.session_state.drift_scores = []
 
 # =========================
-# TRANSACTION GENERATOR
+# LOAD MODEL SAFELY
 # =========================
-def generate_txn():
-    return {
-        "amount": random.randint(100, 900000),
-        "velocity": random.randint(0, 200),
-        "balance": random.randint(0, 300000)
-    }
+MODEL_PATH = "models/fraud_ensemble.pkl"
 
-# =========================
-# SIMPLE AGENTS
-# =========================
-def score_txn(txn):
-
-    if scaler is None or model is None:
-        return None, None, "MODEL NOT LOADED"
-
-    X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
-    Xs = scaler.transform(X)
-
-    prob = model.predict_proba(Xs)[0][1]
-
-    signal = (
-        (txn["velocity"] > 120) +
-        (txn["amount"] > 500000) +
-        (txn["balance"] < 5000)
-    )
-
-    final = 0.6 * prob + 0.4 * (signal / 3)
-
-    if final > 0.75:
-        decision = "BLOCK 🚨"
-    elif final > 0.45:
-        decision = "REVIEW ⚠️"
-    else:
-        decision = "SAFE ✅"
-
-    return prob, final, decision
+bundle = None
+if os.path.exists(MODEL_PATH):
+    bundle = joblib.load(MODEL_PATH)
+else:
+    st.warning("⚠️ Model not found. Please upload/train fraud_ensemble.pkl")
 
 # =========================
-# CONTROL PANEL
+# CONTROL PANEL (START LEFT)
 # =========================
 col1, col2 = st.columns(2)
 
@@ -96,67 +57,154 @@ with col2:
         st.session_state.running = False
 
 # =========================
-# LIVE STREAM PLACEHOLDER
+# TRANSACTION GENERATOR
 # =========================
-st.subheader("🔴 LIVE TRANSACTION STREAM")
+def generate_txn():
+    return {
+        "amount": random.randint(100, 900000),
+        "velocity": random.randint(0, 200),
+        "balance": random.randint(0, 300000)
+    }
 
+# =========================
+# AGENT LOGIC
+# =========================
+def rule_signals(txn):
+    return (
+        (txn["amount"] > 500000) +
+        (txn["velocity"] > 120) +
+        (txn["balance"] < 5000)
+    )
+
+# =========================
+# SCORING ENGINE
+# =========================
+def score(txn):
+
+    if bundle:
+        xgb = bundle["xgb_model"]
+        lgbm = bundle["lgbm_model"]
+
+        X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
+
+        p1 = xgb.predict_proba(X)[0][1]
+        p2 = lgbm.predict_proba(X)[0][1]
+
+        ml_score = 0.55 * p1 + 0.45 * p2
+    else:
+        ml_score = 0.5
+
+    rule_score = rule_signals(txn) / 3
+
+    final_score = 0.6 * ml_score + 0.4 * rule_score
+
+    if final_score > 0.75:
+        decision = "BLOCK 🚨"
+    elif final_score > 0.5:
+        decision = "REVIEW ⚠️"
+    else:
+        decision = "SAFE ✅"
+
+    return ml_score, final_score, decision
+
+# =========================
+# DRIFT MONITOR
+# =========================
+def drift_monitor(value):
+    st.session_state.drift_scores.append(value)
+
+    if len(st.session_state.drift_scores) > 50:
+        st.session_state.drift_scores.pop(0)
+
+    return np.std(st.session_state.drift_scores) if st.session_state.drift_scores else 0
+
+# =========================
+# LIVE ENGINE
+# =========================
 placeholder = st.empty()
 
-# =========================
-# STREAM LOOP (IMPORTANT FIX)
-# =========================
 if st.session_state.running:
 
     txn = generate_txn()
-    prob, final, decision = score_txn(txn)
+    ml_score, final_score, decision = score(txn)
+
+    drift = drift_monitor(final_score)
 
     event = {
         "txn": txn,
-        "ml_score": prob,
-        "final_score": final,
-        "decision": decision
+        "ml_score": ml_score,
+        "final_score": final_score,
+        "decision": decision,
+        "drift": drift
     }
 
-    st.session_state.last = event
-
+    # =========================
+    # STORE ALERTS
+    # =========================
     if decision != "SAFE ✅":
-        st.session_state.queue.append(event)
+        st.session_state.alerts.append(event)
 
-    if txn["amount"] > 800000:
-        st.session_state.ctr.append(event)
+    # STR RULE
+    if final_score > 0.8:
+        st.session_state.str_reports.append(event)
 
-    if final and final > 0.75:
-        st.session_state.str.append(event)
+    # CTR RULE
+    if txn["amount"] > 750000:
+        st.session_state.ctr_reports.append(event)
 
+    # =========================
+    # UI LIVE FEED
+    # =========================
     with placeholder.container():
+
+        st.subheader("🔴 LIVE TRANSACTION STREAM")
         st.json(txn)
-        st.metric("ML Score", round(prob, 4))
-        st.metric("Final Score", round(final, 4))
+
+        st.metric("ML Score", round(ml_score, 4))
+        st.metric("Final Risk Score", round(final_score, 4))
         st.write("Decision:", decision)
+
+        if drift > 1.5:
+            st.error(f"📉 DRIFT DETECTED: {round(drift, 3)}")
+        else:
+            st.success(f"📊 Stable System: {round(drift, 3)}")
 
     time.sleep(1)
     st.rerun()
 
 # =========================
-# SOC QUEUE
+# SOC ALERT QUEUE
 # =========================
 st.subheader("🚨 SOC ALERT QUEUE")
 
-for i in st.session_state.queue[-10:][::-1]:
-    st.json(i)
+for a in st.session_state.alerts[-10:][::-1]:
+    st.json(a)
 
 # =========================
 # STR REPORTS
 # =========================
-st.subheader("🚨 STR REPORTS")
+st.subheader("🚨 STR REPORTS (Suspicious Transaction Reports)")
 
-for i in st.session_state.str[-10:][::-1]:
-    st.json(i)
+for s in st.session_state.str_reports[-10:][::-1]:
+    st.json(s)
 
 # =========================
 # CTR REPORTS
 # =========================
-st.subheader("📄 CTR REPORTS")
+st.subheader("📄 CTR REPORTS (Cash Transaction Reports)")
 
-for i in st.session_state.ctr[-10:][::-1]:
-    st.json(i)
+for c in st.session_state.ctr_reports[-10:][::-1]:
+    st.json(c)
+
+# =========================
+# HUMAN FEEDBACK LOOP
+# =========================
+st.subheader("🧠 Human-in-the-Loop Feedback")
+
+label = st.selectbox("Was prediction correct?", [0, 1])
+
+if st.button("Submit Feedback"):
+    st.session_state.feedback.append(label)
+    st.success("Feedback recorded")
+
+st.write("Total feedback:", len(st.session_state.feedback))
