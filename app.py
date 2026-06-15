@@ -1,256 +1,214 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import time
+import joblib
+import os
+
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from scipy.stats import ks_2samp
 
 # =========================
-# INIT
+# APP CONFIG
 # =========================
-
-st.set_page_config(page_title="RBI Agentic AML SOC", layout="wide")
-
-st.title("🏦 RBI AML + Fraud SOC (Agentic ML + Self-Learning System)")
-
-if "running" not in st.session_state:
-    st.session_state.running = False
-
-if "tick" not in st.session_state:
-    st.session_state.tick = 0
-
-if "events" not in st.session_state:
-    st.session_state.events = []
-
-if "cases" not in st.session_state:
-    st.session_state.cases = []
+st.set_page_config(page_title="Fraud SOC", layout="wide")
+st.title("🏦 Fraud SOC (Agentic ML System)")
 
 # =========================
-# 🧠 ML AGENT WEIGHTS (SELF-LEARNING)
+# CREATE MODEL FOLDER
 # =========================
-
-if "weights" not in st.session_state:
-    st.session_state.weights = {
-        "amount": 0.25,
-        "velocity": 0.25,
-        "behavior": 0.25,
-        "repeat": 0.25
-    }
-
-if "customer_memory" not in st.session_state:
-    st.session_state.customer_memory = {}
+os.makedirs("models", exist_ok=True)
 
 # =========================
-# CONTROL PANEL
+# SESSION STATE INIT
 # =========================
+def init_state():
+    if "feedback_data" not in st.session_state:
+        st.session_state.feedback_data = []
+    if "last_pred" not in st.session_state:
+        st.session_state.last_pred = None
+    if "last_feat" not in st.session_state:
+        st.session_state.last_feat = None
 
-c1, c2 = st.columns(2)
-
-if c1.button("▶ START SOC"):
-    st.session_state.running = True
-
-if c2.button("⛔ STOP"):
-    st.session_state.running = False
-
-# =========================
-# TRANSACTION GENERATOR
-# =========================
-
-def generate_txn():
-
-    return {
-        "amount": np.random.normal(60000, 40000),
-        "velocity": np.random.randint(1, 12),
-        "behavior": np.random.choice([0, 1]),
-        "customer": f"C{np.random.randint(100,120)}"
-    }
+init_state()
 
 # =========================
-# 🧠 AGENT 1: AMOUNT MODEL (LEARNED SCORE)
+# TRAINING FUNCTION
 # =========================
+def train_models(df):
+    X = df.drop(columns=["target"])
+    y = df["target"]
 
-def amount_agent(x):
-    return min(x["amount"] / 200000, 1)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-# =========================
-# 🧠 AGENT 2: VELOCITY MODEL
-# =========================
+    xgb = XGBClassifier(n_estimators=300, max_depth=5, learning_rate=0.05)
+    lgbm = LGBMClassifier(n_estimators=300)
 
-def velocity_agent(x):
-    return min(x["velocity"] / 10, 1)
+    xgb.fit(X_scaled, y)
+    lgbm.fit(X_scaled, y)
 
-# =========================
-# 🧠 AGENT 3: BEHAVIOR MODEL
-# =========================
+    joblib.dump(xgb, "models/xgb.pkl")
+    joblib.dump(lgbm, "models/lgbm.pkl")
+    joblib.dump(scaler, "models/scaler.pkl")
 
-def behavior_agent(x):
-    return float(x["behavior"])
-
-# =========================
-# 🧠 AGENT 4: MEMORY / REPEAT MODEL
-# =========================
-
-def repeat_agent(x):
-
-    cust = x["customer"]
-
-    count = st.session_state.customer_memory.get(cust, 0)
-
-    st.session_state.customer_memory[cust] = count + 1
-
-    return min(count / 5, 1)
+    return "Training completed"
 
 # =========================
-# 🧠 META LEARNER (WEIGHTED CONSENSUS)
+# FEEDBACK SYSTEM
 # =========================
+def add_feedback(features, prediction, label):
+    st.session_state.feedback_data.append({
+        "features": features.flatten(),
+        "prediction": prediction,
+        "label": label
+    })
 
-def compute_risk(x):
-
-    w = st.session_state.weights
-
-    score = (
-        w["amount"] * amount_agent(x) +
-        w["velocity"] * velocity_agent(x) +
-        w["behavior"] * behavior_agent(x) +
-        w["repeat"] * repeat_agent(x)
-    )
-
-    noise = np.random.normal(0, 0.05)
-
-    return float(np.clip(score + noise, 0, 1))
+def get_feedback_df():
+    return pd.DataFrame(st.session_state.feedback_data)
 
 # =========================
-# DECISION ENGINE (RBI STYLE)
+# SELF-LEARNING (RETRAIN)
 # =========================
+def update_model_with_feedback():
+    df = get_feedback_df()
+    if len(df) < 20:
+        return "Not enough feedback data"
 
-def decision(risk):
+    X = np.vstack(df["features"].values)
+    y = df["label"].values
 
-    if risk > 0.8:
-        return "FREEZE"
-    elif risk > 0.6:
-        return "STR"
-    elif risk > 0.4:
-        return "REVIEW"
-    return "ALLOW"
+    model = joblib.load("models/xgb.pkl")
 
-# =========================
-# 🔥 SELF-HEALING FROM FEEDBACK
-# =========================
+    model.fit(X, y)
 
-def learn(feedback, x, risk):
+    joblib.dump(model, "models/xgb.pkl")
 
-    w = st.session_state.weights
-
-    error = 0
-
-    if feedback == "MISSED FRAUD":
-        error = 1 - risk
-    elif feedback == "FALSE POSITIVE":
-        error = -risk
-
-    lr = 0.02
-
-    w["amount"] += lr * error * amount_agent(x)
-    w["velocity"] += lr * error * velocity_agent(x)
-    w["behavior"] += lr * error * behavior_agent(x)
-    w["repeat"] += lr * error * repeat_agent(x)
-
-    # normalize
-    s = sum(w.values())
-    for k in w:
-        w[k] = max(0.05, min(w[k] / s, 0.7))
+    return "Model updated from feedback"
 
 # =========================
-# STREAM ENGINE
+# DRIFT DETECTION
 # =========================
+def check_drift(old_data, new_data):
+    drift_score = 0
 
-def step():
+    for i in range(old_data.shape[1]):
+        stat, p = ks_2samp(old_data[:, i], new_data[:, i])
+        if p < 0.05:
+            drift_score += 1
 
-    st.session_state.tick += 1
-
-    txn = generate_txn()
-
-    risk = compute_risk(txn)
-
-    dec = decision(risk)
-
-    event = {
-        "tick": st.session_state.tick,
-        "amount": txn["amount"],
-        "risk": risk,
-        "decision": dec,
-        "customer": txn["customer"]
-    }
-
-    st.session_state.events.insert(0, event)
-    st.session_state.events = st.session_state.events[:30]
-
-    if dec in ["STR", "FREEZE", "REVIEW"]:
-        st.session_state.cases.insert(0, event)
+    return drift_score / old_data.shape[1]
 
 # =========================
-# RUN STREAM
+# LOAD MODELS
 # =========================
+def load_models():
+    if os.path.exists("models/scaler.pkl"):
+        scaler = joblib.load("models/scaler.pkl")
+        xgb = joblib.load("models/xgb.pkl")
+        return scaler, xgb
+    return None, None
 
-if st.session_state.running:
-    step()
-    time.sleep(1)
-    st.rerun()
+scaler, xgb = load_models()
 
 # =========================
-# UI: LIVE ALERT STREAM
+# SIDEBAR: TRAINING MODE
 # =========================
+st.sidebar.header("⚙️ Model Controls")
 
-st.subheader("🚨 LIVE SOC ALERT STREAM")
+uploaded_file = st.sidebar.file_uploader("Upload Training Data (CSV)", type=["csv"])
 
-for e in st.session_state.events[:10]:
-
-    if e["decision"] == "FREEZE":
-        st.error(f"🧊 FREEZE | Risk={e['risk']:.2f} | {e['customer']}")
-
-    elif e["decision"] == "STR":
-        st.warning(f"📌 STR | Risk={e['risk']:.2f} | {e['customer']}")
-
-    elif e["decision"] == "REVIEW":
-        st.warning(f"⚠️ REVIEW | Risk={e['risk']:.2f} | {e['customer']}")
-
+if st.sidebar.button("Train Model"):
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        msg = train_models(df)
+        st.sidebar.success(msg)
     else:
-        st.success(f"🟢 ALLOW | Risk={e['risk']:.2f} | {e['customer']}")
+        st.sidebar.error("Upload dataset first")
 
 # =========================
-# HITL QUEUE
+# INPUT SECTION
 # =========================
+st.subheader("🔍 Transaction Input")
 
-st.subheader("📌 AML Investigation Queue")
+amount = st.number_input("Amount", value=0.0)
+velocity = st.number_input("Velocity", value=0.0)
+balance = st.number_input("Balance", value=0.0)
 
-if st.session_state.cases:
-    st.dataframe(pd.DataFrame(st.session_state.cases))
+X = np.array([[amount, velocity, balance]])
+
+# =========================
+# PREDICTION
+# =========================
+if scaler is not None and xgb is not None:
+
+    X_scaled = scaler.transform(X)
+
+    if st.button("Analyze Transaction"):
+
+        prob = xgb.predict_proba(X_scaled)[0][1]
+
+        st.metric("Fraud Score", round(prob, 4))
+
+        if prob > 0.85:
+            st.error("BLOCK 🚨 HIGH RISK")
+        elif prob > 0.6:
+            st.warning("REVIEW ⚠️ MEDIUM RISK")
+        else:
+            st.success("SAFE ✅ LOW RISK")
+
+        st.session_state.last_pred = prob
+        st.session_state.last_feat = X_scaled
+
 else:
-    st.info("No AML cases yet")
+    st.warning("Please train/load model first")
 
 # =========================
-# 🧠 HUMAN FEEDBACK LOOP (REAL SELF LEARNING)
+# FEEDBACK UI
 # =========================
+st.subheader("🧠 Human Feedback Loop")
 
-st.subheader("👨‍💼 Human Feedback (Self Learning)")
+label = st.selectbox("Was prediction correct?", [0, 1])
 
-if st.session_state.events:
-
-    latest = st.session_state.events[0]
-
-    fb = st.selectbox(
-        "Label latest transaction",
-        ["CORRECT", "FALSE POSITIVE", "MISSED FRAUD"]
-    )
-
-    if st.button("Apply Learning"):
-
-        learn(fb, latest, latest["risk"])
-
-        st.success("Model updated via feedback learning!")
+if st.button("Submit Feedback"):
+    if st.session_state.last_feat is not None:
+        add_feedback(st.session_state.last_feat, st.session_state.last_pred, label)
+        st.success("Feedback stored")
+    else:
+        st.error("No prediction available yet")
 
 # =========================
-# MODEL STATE
+# RETRAIN FROM FEEDBACK
 # =========================
+if st.button("Retrain Model from Feedback"):
+    msg = update_model_with_feedback()
+    st.success(msg)
 
-st.subheader("🧠 Agent Learning State")
+# =========================
+# FEEDBACK VIEW
+# =========================
+st.subheader("📊 Feedback Logs")
 
-st.json(st.session_state.weights)
+if len(st.session_state.feedback_data) > 0:
+    st.dataframe(get_feedback_df())
+else:
+    st.info("No feedback yet")
+
+# =========================
+# DRIFT CHECK DEMO (OPTIONAL)
+# =========================
+st.subheader("📉 Drift Monitor")
+
+if scaler is not None:
+    old_sample = np.random.randn(50, 3)
+    new_sample = np.random.randn(50, 3)
+
+    drift = check_drift(old_sample, new_sample)
+
+    st.write("Drift Score:", round(drift, 3))
+
+    if drift > 0.3:
+        st.warning("Data Drift Detected ⚠️")
+    else:
+        st.success("No Significant Drift ✅")
