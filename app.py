@@ -10,8 +10,8 @@ from datetime import datetime
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="SOC v9 Bank Deployment", layout="wide")
-st.title("🏦 SOC v9 (Bank Deployment Simulation - AML + Fraud Intelligence System)")
+st.set_page_config(page_title="SOC v9.1 Bank Grade", layout="wide")
+st.title("🏦 SOC v9.1 (Corrected Bank AML Intelligence System)")
 
 # =========================
 # STATE INIT
@@ -23,10 +23,9 @@ def init_state():
         "alerts": [],
         "str": [],
         "ctr": [],
-        "cases": {},
+        "graph": {},
         "audit": [],
-        "case_id": 1000,
-        "graph": {}   # fraud network graph
+        "case_id": 1000
     }
 
     for k, v in defaults.items():
@@ -43,14 +42,14 @@ MODEL_PATH = "models/fraud_ensemble.pkl"
 bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
 # =========================
-# CONTROL PANEL
+# SIDEBAR CONTROL
 # =========================
-st.sidebar.header("⚙️ SOC CONTROL PANEL")
+st.sidebar.header("⚙️ SOC CONTROL")
 
-if st.sidebar.button("▶ START SOC"):
+if st.sidebar.button("▶ START STREAM"):
     st.session_state.running = True
 
-if st.sidebar.button("⛔ STOP SOC"):
+if st.sidebar.button("⛔ STOP STREAM"):
     st.session_state.running = False
 
 st.sidebar.metric("Alerts", len(st.session_state.alerts))
@@ -58,60 +57,41 @@ st.sidebar.metric("STR", len(st.session_state.str))
 st.sidebar.metric("CTR", len(st.session_state.ctr))
 
 # =========================
-# FRAUD GRAPH (MULE NETWORK)
-# =========================
-def update_graph(account, txn_type):
-    if account not in st.session_state.graph:
-        st.session_state.graph[account] = []
-
-    st.session_state.graph[account].append(txn_type)
-
-# =========================
-# ATTACK SIMULATION ENGINE
+# TXN GENERATOR (ATTACK SIMULATION)
 # =========================
 def generate_txn():
 
     r = random.random()
-    account_id = random.randint(1000, 1010)
+    account = random.randint(1000, 1005)
 
-    if r < 0.20:
-        t = "MULE_BURST"
-        amt = random.randint(300000, 900000)
-        vel = random.randint(120, 260)
-        bal = random.randint(0, 15000)
+    if r < 0.2:
+        return {"account": account, "amount": random.randint(300000, 900000),
+                "velocity": random.randint(120, 260),
+                "balance": random.randint(0, 15000),
+                "type": "MULE"}
 
-    elif r < 0.35:
-        t = "STRUCTURING"
-        amt = random.randint(80000, 200000)
-        vel = random.randint(60, 140)
-        bal = random.randint(10000, 80000)
+    if r < 0.4:
+        return {"account": account, "amount": random.randint(80000, 200000),
+                "velocity": random.randint(60, 140),
+                "balance": random.randint(10000, 80000),
+                "type": "STRUCTURING"}
 
-    elif r < 0.45:
-        t = "VELOCITY_ATTACK"
-        amt = random.randint(50000, 300000)
-        vel = random.randint(150, 260)
-        bal = random.randint(0, 20000)
+    if r < 0.6:
+        return {"account": account, "amount": random.randint(50000, 300000),
+                "velocity": random.randint(150, 260),
+                "balance": random.randint(0, 20000),
+                "type": "VELOCITY"}
 
-    else:
-        t = "NORMAL"
-        amt = random.randint(5000, 120000)
-        vel = random.randint(0, 80)
-        bal = random.randint(20000, 500000)
-
-    update_graph(account_id, t)
-
-    return {
-        "account": account_id,
-        "amount": amt,
-        "velocity": vel,
-        "balance": bal,
-        "type": t
-    }
+    return {"account": account, "amount": random.randint(5000, 120000),
+            "velocity": random.randint(0, 80),
+            "balance": random.randint(20000, 500000),
+            "type": "NORMAL"}
 
 # =========================
 # ML SCORE
 # =========================
 def ml_score(txn):
+
     if not bundle:
         return 0.5
 
@@ -123,7 +103,7 @@ def ml_score(txn):
     return 0.55 * xgb.predict_proba(X)[0][1] + 0.45 * lgbm.predict_proba(X)[0][1]
 
 # =========================
-# CASE SYSTEM
+# CASE ID
 # =========================
 def new_case():
     st.session_state.case_id += 1
@@ -150,19 +130,19 @@ def risk_engine(txn, history):
 
     anomaly_score = sum(anomaly) / 3
 
-    attack_boost = {
-        "MULE_BURST": 0.45,
+    attack_map = {
+        "MULE": 0.45,
         "STRUCTURING": 0.30,
-        "VELOCITY_ATTACK": 0.35,
+        "VELOCITY": 0.35,
         "NORMAL": 0.0
-    }[txn["type"]]
+    }
 
-    final_score = 0.6 * ml + 0.3 * anomaly_score + attack_boost
+    final_score = 0.6 * ml + 0.3 * anomaly_score + attack_map[txn["type"]]
 
     return ml, final_score
 
 # =========================
-# DECISION ENGINE
+# DECISION ENGINE (TRUTH SOURCE)
 # =========================
 def decision_engine(score):
     if score >= 0.75:
@@ -172,25 +152,34 @@ def decision_engine(score):
     return "SAFE"
 
 # =========================
-# STR ENGINE (AML COMPLIANT)
+# EXPLANATION (NOW CONSISTENT)
 # =========================
-def is_str(event, history):
+def explain(txn, score):
 
-    if len(history) < 6:
-        return False
+    reasons = []
 
-    txn = event["txn"]
-    recent = history[-10:]
+    if score > 0.75:
+        reasons.append("Critical fraud probability detected")
 
-    avg_amt = np.mean([h["txn"]["amount"] for h in recent])
-    avg_vel = np.mean([h["txn"]["velocity"] for h in recent])
+    elif score > 0.55:
+        reasons.append("Suspicious behavioral pattern detected")
 
-    return (
-        txn["amount"] > 2.5 * avg_amt and
-        txn["velocity"] > 2 * avg_vel and
-        event["final"] > 0.7 and
-        txn["type"] in ["MULE_BURST", "STRUCTURING"]
-    )
+    if score > 0.6 and txn["amount"] > 200000:
+        reasons.append("High-value anomaly correlated with risk score")
+
+    if score > 0.6 and txn["velocity"] > 150:
+        reasons.append("Velocity laundering pattern detected")
+
+    if score < 0.4:
+        reasons.append("Normal behavior baseline confirmed")
+
+    return reasons
+
+# =========================
+# STR ENGINE (FIXED)
+# =========================
+def is_str(event):
+    return event["final"] > 0.7 and event["txn"]["amount"] > 200000
 
 # =========================
 # CTR ENGINE
@@ -199,40 +188,22 @@ def is_ctr(event):
     return event["txn"]["amount"] > 200000
 
 # =========================
-# EXPLANATION ENGINE
+# FRAUD GRAPH (REAL POPULATION)
 # =========================
-def explain(txn, final):
+def update_graph(txn, score):
 
-    reasons = []
+    acc = txn["account"]
 
-    if final > 0.75:
-        reasons.append("Critical fraud probability detected")
+    if acc not in st.session_state.graph:
+        st.session_state.graph[acc] = {"txns": 0, "risk": 0}
 
-    if txn["type"] == "MULE_BURST":
-        reasons.append("Mule account network activity detected")
+    st.session_state.graph[acc]["txns"] += 1
 
-    if txn["type"] == "STRUCTURING":
-        reasons.append("Structuring (smurfing) pattern detected")
-
-    if txn["velocity"] > 150:
-        reasons.append("Velocity laundering detected")
-
-    if txn["amount"] > 300000:
-        reasons.append("High-value suspicious transfer")
-
-    return reasons
+    if score > 0.6:
+        st.session_state.graph[acc]["risk"] += 1
 
 # =========================
-# REPORTS (BANK READY)
-# =========================
-def str_report():
-    return pd.DataFrame(st.session_state.str)
-
-def ctr_report():
-    return pd.DataFrame(st.session_state.ctr)
-
-# =========================
-# STREAM ENGINE
+# STREAM LOOP
 # =========================
 placeholder = st.empty()
 
@@ -257,13 +228,14 @@ if st.session_state.running:
 
     st.session_state.history.append(event)
     st.session_state.history = st.session_state.history[-100:]
-
     st.session_state.audit.append(event)
+
+    update_graph(txn, final)
 
     if decision != "SAFE":
         st.session_state.alerts.append(event)
 
-    if is_str(event, st.session_state.history):
+    if is_str(event):
         st.session_state.str.append(event)
 
     if is_ctr(event):
@@ -279,8 +251,8 @@ if st.session_state.running:
         with c1:
             st.subheader("🔴 LIVE TRANSACTION")
             st.json(txn)
+            st.write("Case:", case)
             st.write("Account:", txn["account"])
-            st.write("Type:", txn["type"])
 
         with c2:
             st.subheader("🧠 AML ENGINE")
@@ -302,7 +274,7 @@ if st.session_state.running:
     st.rerun()
 
 # =========================
-# DASHBOARD TABLES
+# TABLES
 # =========================
 st.markdown("---")
 
@@ -314,14 +286,14 @@ with col1:
 
 with col2:
     st.subheader("🚨 STR REPORTS")
-    st.dataframe(str_report())
+    st.dataframe(st.session_state.str)
 
 with col3:
     st.subheader("📄 CTR REPORTS")
-    st.dataframe(ctr_report())
+    st.dataframe(st.session_state.ctr)
 
 # =========================
-# FRAUD GRAPH VIEW (OPTIONAL INSIGHT)
+# FRAUD GRAPH VIEW
 # =========================
-st.markdown("### 🕸️ Fraud Network Graph (Mule Links)")
+st.markdown("### 🕸️ Fraud Network Graph (Accounts vs Risk Hits)")
 st.write(st.session_state.graph)
