@@ -4,24 +4,24 @@ import random
 import time
 import joblib
 import os
-import pandas as pd
 from datetime import datetime
 
 # =========================
-# CONFIG
+# PAGE CONFIG
 # =========================
-st.set_page_config(page_title="Bank SOC", layout="wide")
-st.title("🏦 Bank-Grade Fraud SOC (AI + Compliance + Investigation Engine)")
+st.set_page_config(page_title="Enterprise SOC v6", layout="wide")
+
+st.title("🏦 Enterprise Fraud SOC v6 (Bank Production Simulation)")
 
 # =========================
 # STATE INIT
 # =========================
-for k in ["running", "alerts", "str", "ctr", "history", "feedback", "case_id"]:
+for k in ["running", "history", "alerts", "str", "ctr", "cases", "logs"]:
     if k not in st.session_state:
         st.session_state[k] = [] if k != "running" else False
 
-if "case_counter" not in st.session_state:
-    st.session_state.case_counter = 1000
+if "case_id" not in st.session_state:
+    st.session_state.case_id = 1000
 
 # =========================
 # MODEL LOAD
@@ -48,10 +48,9 @@ st.sidebar.metric("CTR", len(st.session_state.ctr))
 # TRANSACTION GENERATOR
 # =========================
 def generate_txn():
-    # realistic skewed fraud distribution
     return {
-        "amount": int(np.random.lognormal(mean=11, sigma=1.2)),
-        "velocity": random.randint(0, 250),
+        "amount": int(np.random.lognormal(12, 1.2)),
+        "velocity": random.randint(0, 220),
         "balance": random.randint(0, 500000)
     }
 
@@ -59,6 +58,7 @@ def generate_txn():
 # ML SCORE
 # =========================
 def ml_score(txn):
+
     if not bundle:
         return 0.5
 
@@ -73,73 +73,17 @@ def ml_score(txn):
     return 0.55 * p1 + 0.45 * p2
 
 # =========================
-# RISK ENGINE (REAL SOC LOGIC)
-# =========================
-def risk_engine(txn, history):
-
-    ml = ml_score(txn)
-
-    # behavioral baseline
-    if len(history) > 5:
-        avg_amt = np.mean([h["txn"]["amount"] for h in history[-10:]])
-        avg_vel = np.mean([h["txn"]["velocity"] for h in history[-10:]])
-    else:
-        avg_amt, avg_vel = txn["amount"], txn["velocity"]
-
-    anomaly = 0
-
-    if txn["amount"] > avg_amt * 2:
-        anomaly += 1
-
-    if txn["velocity"] > avg_vel * 1.8:
-        anomaly += 1
-
-    if txn["balance"] < 5000:
-        anomaly += 1
-
-    final = 0.6 * ml + 0.4 * (anomaly / 3)
-
-    if final > 0.7:
-        decision = "BLOCK"
-    elif final > 0.5:
-        decision = "REVIEW"
-    else:
-        decision = "SAFE"
-
-    return ml, final, decision, anomaly
-
-# =========================
-# STR ENGINE (REALISTIC)
-# =========================
-def is_str(event, history):
-    if len(history) < 5:
-        return False
-
-    recent = history[-10:]
-    avg_amt = np.mean([h["txn"]["amount"] for h in recent])
-
-    spike = event["txn"]["amount"] > 2.5 * avg_amt
-    velocity_spike = event["txn"]["velocity"] > np.mean([h["txn"]["velocity"] for h in recent]) * 2
-
-    return (spike and velocity_spike) or event["final"] > 0.75
-
-# =========================
-# CTR ENGINE
-# =========================
-def is_ctr(event):
-    return event["txn"]["amount"] > 250000 and event["txn"]["velocity"] > 120
-
-# =========================
-# EXPLAINABILITY
+# EXPLAINABILITY ENGINE
 # =========================
 def explain(txn, history):
+
     reasons = []
 
     if txn["amount"] > 300000:
-        reasons.append("High transaction amount detected")
+        reasons.append("High transaction amount anomaly")
 
     if txn["velocity"] > 150:
-        reasons.append("Velocity anomaly detected")
+        reasons.append("Velocity spike detected")
 
     if txn["balance"] < 10000:
         reasons.append("Low balance risk pattern")
@@ -152,14 +96,77 @@ def explain(txn, history):
     return reasons
 
 # =========================
-# CASE ID
+# SOC RISK ENGINE (CORE)
 # =========================
-def new_case():
-    st.session_state.case_counter += 1
-    return f"CASE-{st.session_state.case_counter}"
+def risk_engine(txn, history):
+
+    ml = ml_score(txn)
+
+    if len(history) > 5:
+        avg_amt = np.mean([h["txn"]["amount"] for h in history[-10:]])
+        avg_vel = np.mean([h["txn"]["velocity"] for h in history[-10:]])
+    else:
+        avg_amt, avg_vel = txn["amount"], txn["velocity"]
+
+    anomaly = 0
+    anomaly += txn["amount"] > 2 * avg_amt
+    anomaly += txn["velocity"] > 1.7 * avg_vel
+    anomaly += txn["balance"] < 5000
+
+    anomaly_score = anomaly / 3
+
+    final = 0.65 * ml + 0.35 * anomaly_score
+
+    if final > 0.7:
+        decision = "BLOCK"
+    elif final > 0.5:
+        decision = "REVIEW"
+    else:
+        decision = "SAFE"
+
+    return ml, final, decision, anomaly_score
 
 # =========================
-# LIVE ENGINE
+# STR ENGINE (ENTERPRISE)
+# =========================
+def is_str(event, history):
+
+    if len(history) < 8:
+        return False
+
+    last = history[-10:]
+
+    avg_amt = np.mean([h["txn"]["amount"] for h in last])
+    avg_vel = np.mean([h["txn"]["velocity"] for h in last])
+
+    spike_amt = event["txn"]["amount"] > 2.5 * avg_amt
+    spike_vel = event["txn"]["velocity"] > 2 * avg_vel
+
+    risk_flag = event["final"] > 0.68
+
+    # MULTI-SIGNAL STR (BANK STYLE)
+    return (spike_amt + spike_vel + risk_flag) >= 2
+
+# =========================
+# CTR ENGINE (COMPLIANCE RULE)
+# =========================
+def is_ctr(event):
+    txn = event["txn"]
+
+    return (
+        txn["amount"] > 200000 and
+        txn["velocity"] > 100
+    )
+
+# =========================
+# CASE SYSTEM
+# =========================
+def new_case():
+    st.session_state.case_id += 1
+    return f"CASE-{st.session_state.case_id}"
+
+# =========================
+# STREAM ENGINE
 # =========================
 placeholder = st.empty()
 
@@ -169,11 +176,11 @@ if st.session_state.running:
     ml, final, decision, anomaly = risk_engine(txn, st.session_state.history)
 
     case = new_case()
-    time_now = datetime.now().strftime("%H:%M:%S")
+    now = datetime.now().strftime("%H:%M:%S")
 
     event = {
         "case": case,
-        "time": time_now,
+        "time": now,
         "txn": txn,
         "ml": ml,
         "final": final,
@@ -181,19 +188,18 @@ if st.session_state.running:
         "reason": explain(txn, st.session_state.history)
     }
 
-    # update memory
+    # ADD TO MEMORY FIRST (IMPORTANT)
     st.session_state.history.append(event)
-    st.session_state.history = st.session_state.history[-50:]
+    st.session_state.history = st.session_state.history[-60:]
 
-    # ALERTS
+    # ALERT ENGINE
     if decision != "SAFE":
         st.session_state.alerts.append(event)
 
-    # STR
+    # STR / CTR
     if is_str(event, st.session_state.history):
         st.session_state.str.append(event)
 
-    # CTR
     if is_ctr(event):
         st.session_state.ctr.append(event)
 
@@ -203,7 +209,7 @@ if st.session_state.running:
     st.session_state.ctr = st.session_state.ctr[-30:]
 
     # =========================
-    # UI DASHBOARD
+    # DASHBOARD UI
     # =========================
     with placeholder.container():
 
@@ -213,14 +219,13 @@ if st.session_state.running:
             st.subheader("🔴 LIVE TRANSACTION")
             st.json(txn)
             st.write("Case:", case)
-            st.write("Time:", time_now)
+            st.write("Time:", now)
 
         with c2:
             st.subheader("🧠 AI ENGINE")
 
             st.metric("ML Score", round(ml, 4))
             st.metric("Final Risk", round(final, 4))
-
             st.write("Decision:", decision)
 
             st.subheader("📌 Reasoning")
@@ -229,9 +234,17 @@ if st.session_state.running:
 
         with c3:
             st.subheader("📊 SOC HEALTH")
+
             st.metric("Alerts", len(st.session_state.alerts))
             st.metric("STR", len(st.session_state.str))
             st.metric("CTR", len(st.session_state.ctr))
+
+            drift = np.std([h["final"] for h in st.session_state.history[-20:]]) if st.session_state.history else 0
+
+            if drift > 0.25:
+                st.error(f"📉 DRIFT ALERT: {round(drift,3)}")
+            else:
+                st.success(f"📈 STABLE: {round(drift,3)}")
 
     time.sleep(1)
     st.rerun()
@@ -249,11 +262,11 @@ with col1:
         st.error(f"{a['case']} | {a['decision']} | {a['time']}")
 
 with col2:
-    st.subheader("🚨 STR (Suspicious Tx)")
+    st.subheader("🚨 STR REPORTS")
     for s in st.session_state.str[-10:]:
         st.warning(f"{s['case']} | SCORE {round(s['final'],2)}")
 
 with col3:
-    st.subheader("📄 CTR (Cash Tx)")
+    st.subheader("📄 CTR REPORTS")
     for c in st.session_state.ctr[-10:]:
         st.info(f"{c['case']} | AMT {c['txn']['amount']}")
