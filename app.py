@@ -11,138 +11,148 @@ from xgboost import XGBClassifier
 from scipy.stats import ks_2samp
 
 # =========================
-# APP CONFIG
+# CONFIG
 # =========================
-st.set_page_config(page_title="RBI Fraud SOC", layout="wide")
-st.title("🏦 RBI Fraud SOC (Agentic Live Intelligence System)")
+st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
+st.title("🏦 Agentic Fraud SOC (Learning + Memory + Reasoning Engine)")
 
-# =========================
-# MODEL DIRECTORY
-# =========================
 os.makedirs("models", exist_ok=True)
 
 # =========================
 # SESSION STATE
 # =========================
 def init_state():
+
+    if "running" not in st.session_state:
+        st.session_state.running = False
+
     if "soc_queue" not in st.session_state:
         st.session_state.soc_queue = []
+
+    if "ctr_reports" not in st.session_state:
+        st.session_state.ctr_reports = []
+
+    if "str_reports" not in st.session_state:
+        st.session_state.str_reports = []
+
     if "feedback_data" not in st.session_state:
         st.session_state.feedback_data = []
-    if "last_pred" not in st.session_state:
-        st.session_state.last_pred = None
-    if "last_feat" not in st.session_state:
-        st.session_state.last_feat = None
+
+    if "customer_memory" not in st.session_state:
+        st.session_state.customer_memory = {
+            "amounts": [],
+            "velocities": [],
+            "fraud_count": 0
+        }
+
+    if "last_event" not in st.session_state:
+        st.session_state.last_event = None
 
 init_state()
 
 # =========================
-# TRAINING (OPTIONAL BACKEND USE ONLY)
-# =========================
-def train_models(df):
-    X = df.drop(columns=["target"])
-    y = df["target"]
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    model = XGBClassifier(
-        n_estimators=300,
-        max_depth=5,
-        learning_rate=0.05
-    )
-
-    model.fit(X_scaled, y)
-
-    joblib.dump(model, "models/xgb.pkl")
-    joblib.dump(scaler, "models/scaler.pkl")
-
-    return "Model trained successfully"
-
-# =========================
-# LOAD MODELS
+# MODEL LOAD
 # =========================
 def load_models():
     if os.path.exists("models/xgb.pkl"):
-        model = joblib.load("models/xgb.pkl")
-        scaler = joblib.load("models/scaler.pkl")
-        return scaler, model
+        return joblib.load("models/scaler.pkl"), joblib.load("models/xgb.pkl")
     return None, None
 
 scaler, model = load_models()
 
 # =========================
-# RBI-STYLE AGENTS
-# =========================
-def velocity_agent(txn):
-    return 1 if txn["velocity"] > 70 else 0
-
-def amount_agent(txn):
-    return 1 if txn["amount"] > 30000 else 0
-
-def balance_agent(txn):
-    return 1 if txn["balance"] < 1000 else 0
-
-# =========================
-# DECISION ENGINE (CORE INTELLIGENCE)
-# =========================
-def decision_engine(prob, txn):
-
-    risk_score = 0
-    risk_score += velocity_agent(txn)
-    risk_score += amount_agent(txn)
-    risk_score += balance_agent(txn)
-
-    if prob > 0.85 or risk_score >= 2:
-        return "BLOCK 🚨"
-    elif prob > 0.6 or risk_score == 1:
-        return "REVIEW ⚠️"
-    else:
-        return "SAFE ✅"
-
-# =========================
-# LIVE TRANSACTION GENERATOR
+# LIVE TRANSACTION
 # =========================
 def generate_transaction():
     return {
-        "amount": round(random.uniform(10, 60000), 2),
-        "velocity": round(random.uniform(0, 120), 2),
-        "balance": round(random.uniform(0, 200000), 2)
+        "amount": random.uniform(10, 800000),
+        "velocity": random.uniform(0, 150),
+        "balance": random.uniform(0, 300000)
     }
 
 # =========================
-# FEEDBACK SYSTEM
+# MEMORY UPDATE
 # =========================
-def add_feedback(features, prediction, label):
-    st.session_state.feedback_data.append({
-        "features": features.flatten(),
-        "prediction": prediction,
-        "label": label
-    })
+def update_memory(txn, is_fraud):
 
-def get_feedback_df():
-    return pd.DataFrame(st.session_state.feedback_data)
+    mem = st.session_state.customer_memory
 
-# =========================
-# RETRAIN FROM FEEDBACK
-# =========================
-def update_model_with_feedback():
-    df = get_feedback_df()
-    if len(df) < 20:
-        return "Need at least 20 feedback samples"
+    mem["amounts"].append(txn["amount"])
+    mem["velocities"].append(txn["velocity"])
 
-    X = np.vstack(df["features"].values)
-    y = df["label"].values
-
-    model = joblib.load("models/xgb.pkl")
-    model.fit(X, y)
-
-    joblib.dump(model, "models/xgb.pkl")
-
-    return "Model updated from feedback"
+    if is_fraud:
+        mem["fraud_count"] += 1
 
 # =========================
-# DRIFT DETECTION
+# MEMORY AGENTS (LEARNING BASED)
+# =========================
+def velocity_agent(txn):
+    mem = st.session_state.customer_memory
+    base = np.mean(mem["velocities"]) if mem["velocities"] else 50
+    return abs(txn["velocity"] - base) / (base + 1)
+
+def amount_agent(txn):
+    mem = st.session_state.customer_memory
+    base = np.mean(mem["amounts"]) if mem["amounts"] else 10000
+    return abs(txn["amount"] - base) / (base + 1)
+
+def balance_agent(txn):
+    return 1 / (txn["balance"] + 1)
+
+# =========================
+# REASONING META AGENT
+# =========================
+def reasoning_agent(prob, signals, txn):
+
+    mem = st.session_state.customer_memory
+    memory_risk = min(mem["fraud_count"] / 10, 1)
+
+    signal_risk = np.mean(list(signals.values()))
+
+    final_score = (
+        0.55 * prob +
+        0.30 * signal_risk +
+        0.15 * memory_risk
+    )
+
+    if final_score > 0.75:
+        return "BLOCK 🚨", final_score
+    elif final_score > 0.45:
+        return "REVIEW ⚠️", final_score
+    else:
+        return "SAFE ✅", final_score
+
+# =========================
+# CTR / STR ENGINE
+# =========================
+def generate_reports(event):
+
+    txn = event["txn"]
+    score = event["final_score"]
+    signals = event["signals"]
+
+    risk_flags = sum([1 if v > 0.6 else 0 for v in signals.values()])
+
+    # CTR
+    if txn["amount"] >= 1000000:
+        st.session_state.ctr_reports.append({
+            "type": "CTR",
+            "reason": "High Value Transaction",
+            "txn": txn
+        })
+
+    # STR
+    if score > 0.75 or risk_flags >= 2:
+        st.session_state.str_reports.append({
+            "type": "STR",
+            "reason": "Agent + ML Suspicion",
+            "txn": txn,
+            "score": score,
+            "signals": signals
+        })
+
+# =========================
+# DRIFT
 # =========================
 def check_drift(old, new):
     drift = 0
@@ -153,29 +163,30 @@ def check_drift(old, new):
     return drift / old.shape[1]
 
 # =========================
-# SIDEBAR INFO
+# CONTROL PANEL
 # =========================
-st.sidebar.header("⚙️ SOC Controls")
+st.subheader("📡 SOC Control Panel")
 
-st.sidebar.write("System: LIVE RBI Fraud Intelligence Engine")
-st.sidebar.write("Agents: Velocity | Amount | Balance | ML Risk Engine")
+c1, c2 = st.columns(2)
 
-if st.sidebar.button("Reset SOC Queue"):
-    st.session_state.soc_queue = []
+with c1:
+    if st.button("▶️ Start SOC"):
+        st.session_state.running = True
+
+with c2:
+    if st.button("⛔ Stop SOC"):
+        st.session_state.running = False
 
 # =========================
-# LIVE SOC STREAM (CORE)
+# LIVE SOC STREAM
 # =========================
-st.subheader("📡 LIVE RBI FRAUD SOC STREAM")
+st.subheader("🔴 LIVE AGENTIC SOC STREAM")
 
 placeholder = st.empty()
 
-# =========================
-# MAIN STREAM LOOP
-# =========================
 if scaler is not None and model is not None:
 
-    for _ in range(1000):
+    if st.session_state.running:
 
         txn = generate_transaction()
 
@@ -184,94 +195,126 @@ if scaler is not None and model is not None:
 
         prob = model.predict_proba(Xs)[0][1]
 
-        decision = decision_engine(prob, txn)
+        signals = {
+            "velocity": velocity_agent(txn),
+            "amount": amount_agent(txn),
+            "balance": balance_agent(txn)
+        }
 
-        alert = {
-            "transaction": txn,
-            "fraud_score": round(prob, 4),
+        decision, final_score = reasoning_agent(prob, signals, txn)
+
+        event = {
+            "txn": txn,
+            "ml_score": round(prob, 4),
+            "final_score": round(final_score, 4),
+            "signals": signals,
             "decision": decision
         }
 
-        st.session_state.soc_queue.append(alert)
+        st.session_state.last_event = event
+
+        is_fraud = 1 if decision == "BLOCK 🚨" else 0
+        update_memory(txn, is_fraud)
+
+        if decision != "SAFE ✅":
+            st.session_state.soc_queue.append(event)
+
+        generate_reports(event)
 
         with placeholder.container():
 
-            st.markdown("### 🔴 LIVE TRANSACTION FEED (RBI STYLE SOC)")
+            st.markdown("### 🔴 LIVE TRANSACTION")
 
             st.json(txn)
 
-            st.metric("Fraud Probability", round(prob, 4))
+            st.metric("ML Fraud Score", round(prob, 4))
+            st.metric("Final Risk Score", round(final_score, 4))
 
-            st.markdown(f"## FINAL DECISION: {decision}")
+            st.write("Agent Signals:", signals)
 
             if decision == "BLOCK 🚨":
-                st.error("TRANSACTION BLOCKED")
+                st.error("BLOCKED")
             elif decision == "REVIEW ⚠️":
-                st.warning("SENT TO MANUAL REVIEW")
+                st.warning("REVIEW REQUIRED")
             else:
-                st.success("APPROVED SAFE")
-
-            st.progress(min(prob, 1.0))
+                st.success("SAFE")
 
         time.sleep(1)
 
 else:
-    st.warning("⚠️ Train model first (optional backend step)")
+    st.warning("Model not loaded. Train first.")
 
 # =========================
-# SOC ALERT QUEUE DASHBOARD
+# SOC QUEUE
 # =========================
-st.subheader("🚨 SOC ALERT QUEUE (LIVE CASE LOGS)")
+st.subheader("🚨 SOC ALERT QUEUE")
 
-if len(st.session_state.soc_queue) > 0:
-
-    for item in st.session_state.soc_queue[-10:][::-1]:
-
-        st.write("---")
-        st.json(item["transaction"])
-        st.write("Fraud Score:", item["fraud_score"])
-        st.write("Decision:", item["decision"])
-
-else:
+if len(st.session_state.soc_queue) == 0:
     st.info("No alerts yet")
+else:
+    for item in st.session_state.soc_queue[-10:][::-1]:
+        st.write("---")
+        st.json(item)
+
+# =========================
+# STR REPORTS
+# =========================
+st.subheader("🚨 STR REPORTS")
+
+if len(st.session_state.str_reports) == 0:
+    st.info("No STR generated")
+else:
+    for r in st.session_state.str_reports[-10:][::-1]:
+        st.write("---")
+        st.json(r)
+
+# =========================
+# CTR REPORTS
+# =========================
+st.subheader("📄 CTR REPORTS")
+
+if len(st.session_state.ctr_reports) == 0:
+    st.info("No CTR generated")
+else:
+    for r in st.session_state.ctr_reports[-10:][::-1]:
+        st.write("---")
+        st.json(r)
 
 # =========================
 # HUMAN FEEDBACK LOOP
 # =========================
-st.subheader("🧠 Human-in-the-Loop Feedback")
+st.subheader("🧠 HITL Feedback")
 
-label = st.selectbox("Was system decision correct?", [0, 1])
+if st.session_state.last_event:
 
-if st.button("Submit Feedback"):
-    if st.session_state.last_feat is not None:
-        add_feedback(
-            st.session_state.last_feat,
-            st.session_state.last_pred,
-            label
-        )
-        st.success("Feedback stored")
-    else:
-        st.warning("No active prediction to evaluate")
+    label = st.selectbox("Was decision correct?", [0, 1])
 
-# =========================
-# RETRAIN BUTTON
-# =========================
-if st.button("Retrain Model from Feedback"):
-    st.success(update_model_with_feedback())
+    if st.button("Submit Feedback"):
+
+        st.session_state.feedback_data.append({
+            "features": list(st.session_state.last_event["txn"].values()),
+            "prediction": st.session_state.last_event["final_score"],
+            "label": label
+        })
+
+        st.success("Feedback recorded")
+
+else:
+    st.info("No active event")
 
 # =========================
 # DRIFT MONITOR
 # =========================
 st.subheader("📉 Drift Monitor")
 
-old_sample = np.random.randn(50, 3)
-new_sample = np.random.randn(50, 3)
+old = np.random.randn(50, 3)
+new = np.random.randn(50, 3)
 
-drift_score = check_drift(old_sample, new_sample)
+drift = check_drift(old, new)
 
-st.write("Drift Score:", round(drift_score, 3))
+st.write("Drift Score:", round(drift, 3))
 
-if drift_score > 0.3:
-    st.error("⚠️ DATA DRIFT DETECTED")
+if drift > 0.3:
+    st.error("Data Drift Detected")
 else:
-    st.success("Stable System")
+    st.success("System Stable")
