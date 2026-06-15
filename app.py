@@ -8,13 +8,13 @@ import pandas as pd
 from datetime import datetime
 
 # =========================
-# PAGE CONFIG
+# CONFIG
 # =========================
-st.set_page_config(page_title="SOC v10.3 Stable Bank Engine", layout="wide")
-st.title("🏦 SOC v10.3 (Stable AML + Fraud Intelligence System)")
+st.set_page_config(page_title="SOC v10.4 Stable Engine", layout="wide")
+st.title("🏦 SOC v10.4 (Bank-Grade Fraud + AML Intelligence System)")
 
 # =========================
-# SAFE STATE INIT
+# STATE INIT (HARD SAFE)
 # =========================
 def init_state():
     defaults = {
@@ -34,19 +34,16 @@ def init_state():
 
 init_state()
 
-if not isinstance(st.session_state.graph, dict):
-    st.session_state.graph = {}
-
 # =========================
-# SAFE APPEND FUNCTION (CRITICAL FIX)
+# SAFE APPEND (CRITICAL FIX)
 # =========================
 def safe_append(key, value):
-    if key not in st.session_state:
+    if key not in st.session_state or st.session_state[key] is None:
         st.session_state[key] = []
     st.session_state[key].append(value)
 
 # =========================
-# MODEL LOAD
+# LOAD MODEL (OPTIONAL)
 # =========================
 MODEL_PATH = "models/fraud_ensemble.pkl"
 bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
@@ -67,7 +64,7 @@ st.sidebar.metric("STR", len(st.session_state.str))
 st.sidebar.metric("CTR", len(st.session_state.ctr))
 
 # =========================
-# TXN GENERATOR
+# TRANSACTION STREAM
 # =========================
 def generate_txn():
     r = random.random()
@@ -79,13 +76,13 @@ def generate_txn():
                 "balance": random.randint(0, 15000),
                 "type": "MULE"}
 
-    elif r < 0.5:
+    if r < 0.5:
         return {"account": acc, "amount": random.randint(80000, 250000),
                 "velocity": random.randint(60, 160),
                 "balance": random.randint(5000, 80000),
                 "type": "STRUCTURING"}
 
-    elif r < 0.7:
+    if r < 0.7:
         return {"account": acc, "amount": random.randint(50000, 300000),
                 "velocity": random.randint(150, 280),
                 "balance": random.randint(0, 30000),
@@ -111,14 +108,14 @@ def ml_score(txn):
     return 0.55 * xgb.predict_proba(X)[0][1] + 0.45 * lgbm.predict_proba(X)[0][1]
 
 # =========================
-# CASE ENGINE
+# CASE GENERATOR
 # =========================
 def new_case():
     st.session_state.case_id += 1
     return f"CASE-{st.session_state.case_id}"
 
 # =========================
-# RISK ENGINE
+# RISK ENGINE (SINGLE TRUTH)
 # =========================
 def risk_engine(txn, history):
 
@@ -130,13 +127,13 @@ def risk_engine(txn, history):
     else:
         avg_amt, avg_vel = txn["amount"], txn["velocity"]
 
-    anomaly = (
+    anomaly_score = (
         txn["amount"] > 2.5 * avg_amt,
         txn["velocity"] > 2 * avg_vel,
         txn["balance"] < 5000
     )
 
-    anomaly_score = sum(anomaly) / 3
+    anomaly_score = sum(anomaly_score) / 3
 
     attack_map = {
         "MULE": 0.55,
@@ -145,9 +142,9 @@ def risk_engine(txn, history):
         "NORMAL": 0.0
     }
 
-    final_score = 0.6 * ml + 0.3 * anomaly_score + attack_map[txn["type"]]
+    final = 0.6 * ml + 0.3 * anomaly_score + attack_map[txn["type"]]
 
-    return ml, final_score
+    return ml, final
 
 # =========================
 # DECISION ENGINE
@@ -155,25 +152,28 @@ def risk_engine(txn, history):
 def decision_engine(score):
     if score >= 0.80:
         return "BLOCK"
-    elif score >= 0.60:
+    if score >= 0.60:
         return "REVIEW"
     return "SAFE"
 
 # =========================
-# EXPLANATION ENGINE (CONSISTENT)
+# EXPLANATION (CONSISTENT)
 # =========================
 def explain(txn, score):
 
     if score >= 0.80:
         return ["CRITICAL FRAUD DETECTED"]
 
-    elif score >= 0.60:
-        return ["HIGH RISK BEHAVIOR", f"{txn['type']} pattern detected"]
+    if score >= 0.60:
+        return ["HIGH RISK TRANSACTION", "Behavior anomaly detected"]
 
-    return ["NORMAL BEHAVIOR"]
+    if score >= 0.40:
+        return ["SUSPICIOUS PATTERN"]
+
+    return ["NORMAL TRANSACTION"]
 
 # =========================
-# STR RULES
+# STR RULE
 # =========================
 def is_str(event):
     return (
@@ -183,27 +183,27 @@ def is_str(event):
     )
 
 # =========================
-# CTR RULES
+# CTR RULE
 # =========================
 def is_ctr(event):
     return event["txn"]["amount"] >= 200000
 
 # =========================
-# FRAUD GRAPH
+# FRAUD GRAPH (STABLE)
 # =========================
 def update_graph(txn, score):
 
     acc = str(txn["account"])
 
+    if "graph" not in st.session_state:
+        st.session_state.graph = {}
+
     if acc not in st.session_state.graph:
-        st.session_state.graph[acc] = {
-            "txns": 0,
-            "risk_hits": 0
-        }
+        st.session_state.graph[acc] = {"txns": 0, "risk_hits": 0}
 
     st.session_state.graph[acc]["txns"] += 1
 
-    if score >= 0.6:
+    if score >= 0.60:
         st.session_state.graph[acc]["risk_hits"] += 1
 
 # =========================
@@ -214,7 +214,6 @@ placeholder = st.empty()
 if st.session_state.running:
 
     txn = generate_txn()
-
     ml, final = risk_engine(txn, st.session_state.history)
     decision = decision_engine(final)
 
@@ -261,7 +260,7 @@ if st.session_state.running:
         })
 
     # =========================
-    # UI
+    # UI STREAM
     # =========================
     with placeholder.container():
 
@@ -292,7 +291,7 @@ if st.session_state.running:
     st.rerun()
 
 # =========================
-# DASHBOARD TABLES
+# TABLES (SAFE DISPLAY)
 # =========================
 st.markdown("---")
 
@@ -311,10 +310,10 @@ with col3:
     st.dataframe(pd.DataFrame(st.session_state.ctr))
 
 # =========================
-# FRAUD GRAPH
+# FRAUD GRAPH (FIXED DISPLAY)
 # =========================
 st.subheader("🕸️ FRAUD NETWORK GRAPH")
-st.json(st.session_state.graph)
+st.dataframe(pd.DataFrame.from_dict(st.session_state.graph, orient="index"))
 
 # =========================
 # RBI EXPORT
