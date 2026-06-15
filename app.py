@@ -2,50 +2,35 @@ import streamlit as st
 import numpy as np
 import random
 import time
-import threading
 import joblib
 import os
 
-from sklearn.preprocessing import StandardScaler
+# =========================
+# PAGE CONFIG
+# =========================
+st.set_page_config(page_title="Fraud SOC", layout="wide")
+st.title("🏦 Agentic Fraud SOC (LIVE STREAM DEMO)")
 
 # =========================
-# CONFIG
+# STATE
 # =========================
-st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
-st.title("🏦 Agentic Fraud SOC (Stable Real-Time Stream)")
+if "running" not in st.session_state:
+    st.session_state.running = False
 
-os.makedirs("models", exist_ok=True)
+if "queue" not in st.session_state:
+    st.session_state.queue = []
 
-# =========================
-# SESSION STATE
-# =========================
-def init():
-    if "running" not in st.session_state:
-        st.session_state.running = True
+if "str" not in st.session_state:
+    st.session_state.str = []
 
-    if "last_event" not in st.session_state:
-        st.session_state.last_event = None
+if "ctr" not in st.session_state:
+    st.session_state.ctr = []
 
-    if "soc_queue" not in st.session_state:
-        st.session_state.soc_queue = []
-
-    if "str_reports" not in st.session_state:
-        st.session_state.str_reports = []
-
-    if "ctr_reports" not in st.session_state:
-        st.session_state.ctr_reports = []
-
-    if "memory" not in st.session_state:
-        st.session_state.memory = {
-            "amounts": [],
-            "velocities": [],
-            "fraud_count": 0
-        }
-
-init()
+if "last" not in st.session_state:
+    st.session_state.last = None
 
 # =========================
-# LOAD MODEL (SAFE)
+# LOAD MODEL
 # =========================
 def load_model():
     try:
@@ -58,146 +43,44 @@ def load_model():
 scaler, model = load_model()
 
 # =========================
-# TRANSACTION STREAM
+# TRANSACTION GENERATOR
 # =========================
 def generate_txn():
     return {
-        "amount": random.uniform(100, 900000),
-        "velocity": random.uniform(0, 200),
-        "balance": random.uniform(0, 300000)
+        "amount": random.randint(100, 900000),
+        "velocity": random.randint(0, 200),
+        "balance": random.randint(0, 300000)
     }
 
 # =========================
-# MEMORY UPDATE
+# SIMPLE AGENTS
 # =========================
-def update_memory(txn, fraud):
-    m = st.session_state.memory
-    m["amounts"].append(txn["amount"])
-    m["velocities"].append(txn["velocity"])
-    if fraud:
-        m["fraud_count"] += 1
+def score_txn(txn):
 
-# =========================
-# AGENTS (LEARNING STYLE)
-# =========================
-def velocity_agent(txn):
-    m = st.session_state.memory
-    base = np.mean(m["velocities"]) if m["velocities"] else 50
-    return abs(txn["velocity"] - base) / (base + 1)
+    if scaler is None or model is None:
+        return None, None, "MODEL NOT LOADED"
 
-def amount_agent(txn):
-    m = st.session_state.memory
-    base = np.mean(m["amounts"]) if m["amounts"] else 10000
-    return abs(txn["amount"] - base) / (base + 1)
+    X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
+    Xs = scaler.transform(X)
 
-def balance_agent(txn):
-    return 1 / (txn["balance"] + 1)
+    prob = model.predict_proba(Xs)[0][1]
 
-# =========================
-# REASONING ENGINE
-# =========================
-def reasoning(prob, signals, memory):
+    signal = (
+        (txn["velocity"] > 120) +
+        (txn["amount"] > 500000) +
+        (txn["balance"] < 5000)
+    )
 
-    mem_risk = min(memory["fraud_count"] / 10, 1)
-    sig_risk = np.mean(list(signals.values()))
-
-    final = 0.55 * prob + 0.30 * sig_risk + 0.15 * mem_risk
+    final = 0.6 * prob + 0.4 * (signal / 3)
 
     if final > 0.75:
-        return "BLOCK 🚨", final
+        decision = "BLOCK 🚨"
     elif final > 0.45:
-        return "REVIEW ⚠️", final
+        decision = "REVIEW ⚠️"
     else:
-        return "SAFE ✅", final
+        decision = "SAFE ✅"
 
-# =========================
-# STR / CTR
-# =========================
-def generate_reports(event):
-
-    txn = event["txn"]
-
-    if txn["amount"] > 1000000:
-        st.session_state.ctr_reports.append({
-            "type": "CTR",
-            "txn": txn
-        })
-
-    if event["final_score"] > 0.75:
-        st.session_state.str_reports.append({
-            "type": "STR",
-            "txn": txn,
-            "score": event["final_score"]
-        })
-
-# =========================
-# BACKGROUND ENGINE (THREAD)
-# =========================
-def stream_engine():
-
-    while True:
-
-        if not st.session_state.running:
-            time.sleep(1)
-            continue
-
-        txn = generate_txn()
-
-        if scaler is None or model is None:
-            st.session_state.last_event = {
-                "txn": txn,
-                "error": "MODEL NOT LOADED"
-            }
-            time.sleep(1)
-            continue
-
-        X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
-        Xs = scaler.transform(X)
-
-        prob = model.predict_proba(Xs)[0][1]
-
-        signals = {
-            "velocity": velocity_agent(txn),
-            "amount": amount_agent(txn),
-            "balance": balance_agent(txn)
-        }
-
-        final_score = 0.55 * prob + 0.30 * np.mean(list(signals.values())) + 0.15 * (st.session_state.memory["fraud_count"]/10)
-
-        if final_score > 0.75:
-            decision = "BLOCK 🚨"
-        elif final_score > 0.45:
-            decision = "REVIEW ⚠️"
-        else:
-            decision = "SAFE ✅"
-
-        event = {
-            "txn": txn,
-            "ml_score": float(prob),
-            "final_score": float(final_score),
-            "signals": signals,
-            "decision": decision,
-            "time": time.time()
-        }
-
-        st.session_state.last_event = event
-
-        update_memory(txn, decision == "BLOCK 🚨")
-
-        if decision != "SAFE ✅":
-            st.session_state.soc_queue.append(event)
-
-        generate_reports(event)
-
-        time.sleep(1)
-
-# =========================
-# START THREAD ONCE
-# =========================
-if "thread_started" not in st.session_state:
-    st.session_state.thread_started = True
-    t = threading.Thread(target=stream_engine, daemon=True)
-    t.start()
+    return prob, final, decision
 
 # =========================
 # CONTROL PANEL
@@ -205,35 +88,61 @@ if "thread_started" not in st.session_state:
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("⛔ Stop Stream"):
-        st.session_state.running = False
-
-with col2:
     if st.button("▶️ Start Stream"):
         st.session_state.running = True
 
+with col2:
+    if st.button("⛔ Stop Stream"):
+        st.session_state.running = False
+
 # =========================
-# LIVE STREAM UI
+# LIVE STREAM PLACEHOLDER
 # =========================
-st.subheader("🔴 LIVE FRAUD STREAM")
+st.subheader("🔴 LIVE TRANSACTION STREAM")
 
-event = st.session_state.get("last_event", None)
+placeholder = st.empty()
 
-if event:
+# =========================
+# STREAM LOOP (IMPORTANT FIX)
+# =========================
+if st.session_state.running:
 
-    st.json(event["txn"])
+    txn = generate_txn()
+    prob, final, decision = score_txn(txn)
 
-    st.metric("ML Score", round(event.get("ml_score", 0), 4))
-    st.metric("Final Score", round(event.get("final_score", 0), 4))
+    event = {
+        "txn": txn,
+        "ml_score": prob,
+        "final_score": final,
+        "decision": decision
+    }
 
-    st.write("Decision:", event.get("decision", "N/A"))
+    st.session_state.last = event
+
+    if decision != "SAFE ✅":
+        st.session_state.queue.append(event)
+
+    if txn["amount"] > 800000:
+        st.session_state.ctr.append(event)
+
+    if final and final > 0.75:
+        st.session_state.str.append(event)
+
+    with placeholder.container():
+        st.json(txn)
+        st.metric("ML Score", round(prob, 4))
+        st.metric("Final Score", round(final, 4))
+        st.write("Decision:", decision)
+
+    time.sleep(1)
+    st.rerun()
 
 # =========================
 # SOC QUEUE
 # =========================
 st.subheader("🚨 SOC ALERT QUEUE")
 
-for i in st.session_state.soc_queue[-10:][::-1]:
+for i in st.session_state.queue[-10:][::-1]:
     st.json(i)
 
 # =========================
@@ -241,7 +150,7 @@ for i in st.session_state.soc_queue[-10:][::-1]:
 # =========================
 st.subheader("🚨 STR REPORTS")
 
-for i in st.session_state.str_reports[-10:][::-1]:
+for i in st.session_state.str[-10:][::-1]:
     st.json(i)
 
 # =========================
@@ -249,12 +158,5 @@ for i in st.session_state.str_reports[-10:][::-1]:
 # =========================
 st.subheader("📄 CTR REPORTS")
 
-for i in st.session_state.ctr_reports[-10:][::-1]:
+for i in st.session_state.ctr[-10:][::-1]:
     st.json(i)
-
-# =========================
-# IMPORTANT: FORCE REFRESH LOOP
-# =========================
-if st.session_state.running:
-    time.sleep(1)
-    st.rerun()
