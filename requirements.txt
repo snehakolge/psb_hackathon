@@ -1,8 +1,8 @@
 streamlit
-numpy
 pandas
-scikit-learn
+numpy
+joblib
 xgboost
 lightgbm
-umap-learn
-hdbscan
+graphviz
+scikit-learn
