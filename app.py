@@ -1,149 +1,173 @@
 import streamlit as st
-import random
-import numpy as np
 import pandas as pd
-from datetime import datetime
-import time
-
-st.set_page_config(page_title="SOC Stable Engine", layout="wide")
-st.title("🏦 SOC vNEXT (Stable Autonomous AML System)")
+import numpy as np
+import random
+import joblib
 
 # =========================
-# SAFE INIT
+# PAGE CONFIG
 # =========================
-def init():
-    defaults = {
-        "running": False,
-        "case_id": 1000,
-        "alerts": [],
-        "str": [],
-        "ctr": [],
-        "graph": {},   # FIXED STRUCTURE
-        "fraud_rate": 0.5,
-        "last_event": None,
-        "tick": 0
-    }
-
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-init()
+st.set_page_config(page_title="RBI SOC Fraud Engine", layout="wide")
+st.title("🏦 RBI AML + Fraud SOC (Agentic Ensemble Engine)")
 
 # =========================
-# CONTROLS
+# MODEL LOADING
 # =========================
-col1, col2 = st.columns(2)
+@st.cache_resource
+def load_models():
+    bundle = joblib.load("fraud_ensemble.pkl")
+    scaler = joblib.load("scaler.pkl")
+    return bundle, scaler
 
-with col1:
-    if st.button("▶ START SOC"):
-        st.session_state.running = True
+bundle, scaler = load_models()
 
-with col2:
-    if st.button("⛔ STOP SOC"):
-        st.session_state.running = False
+xgb = bundle["xgb"]
+lgbm = bundle["lgbm"]
+weights = bundle["weights"]
+features = bundle["features"]
 
 # =========================
-# TXN GENERATOR (VARIATION FIX)
+# SESSION INIT
 # =========================
-def gen_txn():
-    seed = st.session_state.tick + random.randint(1, 1000)
-
-    random.seed(seed)
-
-    acc = random.randint(1000, 1015)
-    r = random.random()
-
-    if r < 0.3:
-        return {"account": acc, "amount": random.randint(200000, 900000),
-                "velocity": random.randint(120, 260),
-                "balance": random.randint(0, 15000),
-                "type": "MULE"}
-
-    if r < 0.6:
-        return {"account": acc, "amount": random.randint(80000, 250000),
-                "velocity": random.randint(60, 180),
-                "balance": random.randint(5000, 80000),
-                "type": "STRUCTURING"}
-
-    return {"account": acc, "amount": random.randint(5000, 200000),
-            "velocity": random.randint(10, 120),
-            "balance": random.randint(50000, 600000),
-            "type": "NORMAL"}
+if "running" not in st.session_state:
+    st.session_state.running = False
+    st.session_state.graph = {}
+    st.session_state.network_edges = []
+    st.session_state.leaderboard = {}
+    st.session_state.alerts = []
+    st.session_state.str = []
+    st.session_state.ctr = []
 
 # =========================
 # RISK ENGINE
 # =========================
 def risk(txn):
-    ml = random.uniform(0.3, 0.8)
 
-    weights = {
-        "MULE": 0.6,
-        "STRUCTURING": 0.4,
-        "NORMAL": 0.0
-    }
+    row = {}
 
-    final = 0.7 * ml + weights[txn["type"]]
-    return ml, final
+    for f in features:
+        row[f] = random.uniform(0, 1)
+
+    row["F115"] = txn["amount"] / 100000
+    row["F321"] = txn["velocity"]
+    row["BAL_ZSCORE"] = txn["balance"] / 100000
+    row["TXN_FREQ_NORM"] = txn["velocity"] / 250
+    row["DEBIT_CREDIT_RATIO"] = txn["amount"] / max(txn["balance"], 1)
+    row["CREDIT_UTIL_SCORE"] = min(
+        txn["amount"] / max(txn["balance"], 1), 10
+    )
+
+    row["COMPOSITE_RISK"] = (
+        row["TXN_FREQ_NORM"] + row["DEBIT_CREDIT_RATIO"]
+    ) / 2
+
+    row["OBS_PERIOD_RISK"] = row["COMPOSITE_RISK"]
+
+    X = pd.DataFrame([row])
+
+    scaled_cols = [
+        'F3836','F3887','F2082','F2122','F2737',
+        'F115','F321',
+        'BAL_ZSCORE',
+        'TXN_FREQ_NORM',
+        'DEBIT_CREDIT_RATIO',
+        'CREDIT_UTIL_SCORE',
+        'COMPOSITE_RISK',
+        'OBS_PERIOD_RISK'
+    ]
+
+    X[scaled_cols] = scaler.transform(X[scaled_cols])
+
+    xgb_prob = xgb.predict_proba(X)[0][1]
+    lgbm_prob = lgbm.predict_proba(X)[0][1]
+
+    final = (
+        weights["xgb"] * xgb_prob +
+        weights["lgbm"] * lgbm_prob
+    )
+
+    return xgb_prob, final
 
 # =========================
 # DECISION ENGINE
 # =========================
 def decision(score):
-    if score > 0.80:
+    if score >= 0.85:
         return "BLOCK"
-    if score > 0.60:
+    if score >= 0.65:
         return "REVIEW"
     return "SAFE"
 
 # =========================
-# RULES
-# =========================
-def is_str(e):
-    return e["final"] > 0.75 and e["txn"]["amount"] > 200000
-
-def is_ctr(e):
-    return e["txn"]["amount"] > 200000
-
-# =========================
-# SAFE GRAPH UPDATE (FIXED)
+# NETWORK UPDATE
 # =========================
 def update_graph(txn, score):
+
     acc = str(txn["account"])
 
     if acc not in st.session_state.graph:
-        st.session_state.graph[acc] = {"risk": 0.0, "txns": 0}
+        st.session_state.graph[acc] = {
+            "risk": 0,
+            "txns": 0
+        }
 
     st.session_state.graph[acc]["risk"] += float(score)
     st.session_state.graph[acc]["txns"] += 1
 
+    target = str(random.randint(1000, 1015))
+
+    st.session_state.network_edges.append((acc, target))
+
+    if acc not in st.session_state.leaderboard:
+        st.session_state.leaderboard[acc] = []
+
+    st.session_state.leaderboard[acc].append(score)
+
 # =========================
-# ENGINE STEP
+# STR / CTR RULES
 # =========================
-def step():
+def is_str(e):
+    return (
+        e["final"] >= 0.85
+        or e["txn"]["type"] == "MULE"
+    )
 
-    st.session_state.tick += 1
+def is_ctr(e):
+    return e["txn"]["amount"] >= 200000
 
-    txn = gen_txn()
-    ml, final = risk(txn)
-    dec = decision(final)
+# =========================
+# SIDEBAR INPUT
+# =========================
+st.sidebar.header("Transaction Simulator")
 
-    case = st.session_state.case_id
-    st.session_state.case_id += 1
+txn = {
+    "account": st.sidebar.text_input("Account ID", "C1001"),
+    "amount": st.sidebar.number_input("Amount", 1000, 1000000, 50000),
+    "balance": st.sidebar.number_input("Balance", 1000, 5000000, 200000),
+    "velocity": st.sidebar.slider("Velocity", 0.0, 10.0, 2.5),
+    "type": st.sidebar.selectbox("Type", ["NORMAL", "MULE"])
+}
+
+run = st.sidebar.button("Run Transaction")
+
+# =========================
+# MAIN PIPELINE
+# =========================
+if run:
+
+    xgb_p, score = risk(txn)
+    label = decision(score)
 
     event = {
-        "case": f"CASE-{case}",
         "txn": txn,
-        "ml": ml,
-        "final": final,
-        "decision": dec,
-        "time": datetime.now().strftime("%H:%M:%S")
+        "xgb": float(xgb_p),
+        "final": float(score),
+        "label": label
     }
 
-    st.session_state.last_event = event
+    update_graph(txn, score)
 
-    if dec != "SAFE":
-        st.session_state.alerts.append(event)
+    st.session_state.alerts.append(event)
 
     if is_str(event):
         st.session_state.str.append(event)
@@ -151,70 +175,99 @@ def step():
     if is_ctr(event):
         st.session_state.ctr.append(event)
 
-    update_graph(txn, final)
+    # =========================
+    # OUTPUT PANEL
+    # =========================
+    st.subheader("🚨 Decision")
+    st.metric("Final Risk Score", round(score, 4))
+    st.write("Action:", label)
 
 # =========================
-# AUTO LOOP (SAFE)
+# ALERT TABLE
 # =========================
-if st.session_state.running:
-    step()
-    time.sleep(1)
-    st.rerun()
-
-# =========================
-# DASHBOARD
-# =========================
-st.markdown("## 🔴 LIVE SOC DASHBOARD")
-
-if st.session_state.last_event:
-
-    e = st.session_state.last_event
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.subheader("TRANSACTION")
-        st.json(e["txn"])
-        st.write(e["case"])
-
-    with c2:
-        st.subheader("AI ENGINE")
-        st.metric("ML", round(e["ml"], 4))
-        st.metric("FINAL", round(e["final"], 4))
-        st.write(e["decision"])
-
-    with c3:
-        st.subheader("METRICS")
-        st.metric("Alerts", len(st.session_state.alerts))
-        st.metric("STR", len(st.session_state.str))
-        st.metric("CTR", len(st.session_state.ctr))
+st.markdown("## 📊 Alerts")
+if st.session_state.alerts:
+    st.dataframe(pd.DataFrame(st.session_state.alerts)[::-1])
 
 # =========================
-# TABLES (ALWAYS STABLE)
+# STR TABLE
 # =========================
-st.markdown("## 🚨 ALERTS")
-st.dataframe(pd.DataFrame(st.session_state.alerts))
-
-st.markdown("## 🚨 STR")
-st.dataframe(pd.DataFrame(st.session_state.str))
-
-st.markdown("## 📄 CTR")
-st.dataframe(pd.DataFrame(st.session_state.ctr))
+st.markdown("## 🚨 STR Reports")
+if st.session_state.str:
+    st.dataframe(pd.DataFrame(st.session_state.str))
 
 # =========================
-# GRAPH FIX (NO from_dict)
+# CTR TABLE
 # =========================
-st.markdown("## 🕸️ FRAUD GRAPH")
+st.markdown("## 💰 CTR Reports")
+if st.session_state.ctr:
+    st.dataframe(pd.DataFrame(st.session_state.ctr))
 
-if len(st.session_state.graph) > 0:
+# =========================
+# DOWNLOADS
+# =========================
+if st.session_state.alerts:
 
-    df = pd.DataFrame([
-        {"account": k, "risk": v["risk"], "txns": v["txns"]}
-        for k, v in st.session_state.graph.items()
-    ])
+    alerts_df = pd.DataFrame(st.session_state.alerts)
+    str_df = pd.DataFrame(st.session_state.str)
+    ctr_df = pd.DataFrame(st.session_state.ctr)
 
-    st.bar_chart(df.set_index("account")[["risk"]])
-    st.line_chart(df.set_index("account")[["txns"]])
+    st.download_button(
+        "📥 Download Alerts CSV",
+        alerts_df.to_csv(index=False),
+        "alerts.csv"
+    )
+
+    st.download_button(
+        "📥 Download STR CSV",
+        str_df.to_csv(index=False),
+        "str.csv"
+    )
+
+    st.download_button(
+        "📥 Download CTR CSV",
+        ctr_df.to_csv(index=False),
+        "ctr.csv"
+    )
+
+# =========================
+# AML NETWORK GRAPH
+# =========================
+st.markdown("## 🕸️ AML NETWORK")
+
+if st.session_state.network_edges:
+
+    dot = "digraph AML {\n"
+
+    for src, dst in st.session_state.network_edges[-100:]:
+        dot += f'"{src}" -> "{dst}";\n'
+
+    dot += "}"
+
+    st.graphviz_chart(dot)
 
 else:
-    st.info("Graph building after stream starts")
+    st.info("Waiting for transactions...")
+
+# =========================
+# LEADERBOARD
+# =========================
+st.markdown("## 🏆 RISK LEADERBOARD")
+
+rows = []
+
+for acc, scores in st.session_state.leaderboard.items():
+
+    rows.append({
+        "Account": acc,
+        "Avg Risk": round(np.mean(scores), 4),
+        "Max Risk": round(np.max(scores), 4),
+        "Transactions": len(scores)
+    })
+
+if rows:
+
+    lb = pd.DataFrame(rows)
+    lb = lb.sort_values("Avg Risk", ascending=False)
+
+    st.dataframe(lb.head(10))
