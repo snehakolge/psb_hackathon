@@ -4,47 +4,50 @@ import random
 import pandas as pd
 import joblib
 import os
+import networkx as nx
+import matplotlib.pyplot as plt
 from datetime import datetime
 
-st.set_page_config(page_title="SOC v13 Stable Engine", layout="wide")
-st.title("🏦 SOC v13 (Production Fraud + AML Intelligence System)")
+st.set_page_config(page_title="SOC v14 AML Engine", layout="wide")
+st.title("🏦 SOC v14 (Bank-Grade AML + Fraud Intelligence System)")
 
 # =========================
-# FORCE SAFE STATE INIT
+# INIT STATE (CRITICAL FIX)
 # =========================
 def init():
-    keys = {
+    defaults = {
+        "running": False,
         "history": [],
         "alerts": [],
         "str": [],
         "ctr": [],
-        "graph": {},
+        "graph_edges": [],
         "case_id": 1000,
         "last_event": None
     }
-    for k, v in keys.items():
-        if k not in st.session_state or st.session_state[k] is None:
+    for k, v in defaults.items():
+        if k not in st.session_state:
             st.session_state[k] = v
 
 init()
 
 # =========================
-# MODEL
+# MODEL (optional)
 # =========================
 MODEL_PATH = "models/fraud_ensemble.pkl"
 bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
 # =========================
-# TRANSACTION GENERATOR
+# TRANSACTION STREAM
 # =========================
 def gen_txn():
     r = random.random()
-    acc = random.randint(1000, 1012)
+    acc = random.randint(1000, 1015)
 
     if r < 0.3:
         return {"account": acc, "amount": random.randint(300000, 900000),
                 "velocity": random.randint(120, 260),
-                "balance": random.randint(0, 20000),
+                "balance": random.randint(0, 15000),
                 "type": "MULE"}
 
     if r < 0.6:
@@ -87,101 +90,88 @@ def risk(txn):
     return ml, final
 
 # =========================
-# DECISION
+# DECISION ENGINE
 # =========================
 def decision(score):
-    if score >= 0.80:
+    if score > 0.80:
         return "BLOCK"
-    if score >= 0.60:
+    if score > 0.60:
         return "REVIEW"
     return "SAFE"
 
 # =========================
-# STR / CTR
+# STR / CTR LOGIC
 # =========================
 def is_str(e):
-    return e["final"] >= 0.75 and e["txn"]["amount"] > 200000
+    return e["final"] > 0.75 and e["txn"]["amount"] > 200000
 
 def is_ctr(e):
     return e["txn"]["amount"] > 200000
 
 # =========================
-# GRAPH UPDATE (NO LOSS GUARANTEE)
+# GRAPH UPDATE (REAL NETWORK)
 # =========================
 def update_graph(txn, score):
-    acc = str(txn["account"])
+    acc = txn["account"]
 
-    if "graph" not in st.session_state or not isinstance(st.session_state.graph, dict):
-        st.session_state.graph = {}
-
-    if acc not in st.session_state.graph:
-        st.session_state.graph[acc] = {"txns": 0, "risk": 0}
-
-    st.session_state.graph[acc]["txns"] += 1
-    if score > 0.6:
-        st.session_state.graph[acc]["risk"] += 1
+    st.session_state.graph_edges.append((
+        acc,
+        "RISK" if score > 0.6 else "SAFE"
+    ))
 
 # =========================
-# SAFE APPEND
+# MULTI-STREAM GENERATOR (KEY FIX)
 # =========================
-def add(key, value):
-    if key not in st.session_state or st.session_state[key] is None:
-        st.session_state[key] = []
-    st.session_state[key].append(value)
+def generate_batch(n=3):
+    for _ in range(n):
+
+        txn = gen_txn()
+        ml, final = risk(txn)
+        dec = decision(final)
+
+        case = st.session_state.case_id
+        st.session_state.case_id += 1
+
+        event = {
+            "case": f"CASE-{case}",
+            "txn": txn,
+            "ml": ml,
+            "final": final,
+            "decision": dec,
+            "time": datetime.now().strftime("%H:%M:%S")
+        }
+
+        st.session_state.history.append(event)
+        st.session_state.last_event = event
+
+        if dec != "SAFE":
+            st.session_state.alerts.append(event)
+
+        if is_str(event):
+            st.session_state.str.append(event)
+
+        if is_ctr(event):
+            st.session_state.ctr.append(event)
+
+        update_graph(txn, final)
 
 # =========================
-# CONTROL PANEL (IMPORTANT)
+# CONTROL PANEL
 # =========================
 col1, col2 = st.columns(2)
 
-run = False
 with col1:
-    if st.button("▶ GENERATE TRANSACTION"):
-        run = True
+    if st.button("▶ RUN SOC STREAM (BATCH 5 EVENTS)"):
+        generate_batch(5)
 
 with col2:
-    if st.button("🔁 RESET SYSTEM"):
+    if st.button("🔄 RESET SYSTEM"):
         for k in st.session_state.keys():
             del st.session_state[k]
         st.rerun()
 
 # =========================
-# SINGLE EVENT ENGINE (CRITICAL FIX)
-# =========================
-if run:
-
-    txn = gen_txn()
-    ml, final = risk(txn)
-    dec = decision(final)
-
-    case = f"CASE-{st.session_state.case_id}"
-    st.session_state.case_id += 1
-
-    event = {
-        "case": case,
-        "txn": txn,
-        "ml": ml,
-        "final": final,
-        "decision": dec,
-        "time": datetime.now().strftime("%H:%M:%S")
-    }
-
-    st.session_state.last_event = event
-    st.session_state.history.append(event)
-
-    update_graph(txn, final)
-
-    if dec != "SAFE":
-        add("alerts", event)
-
-    if is_str(event):
-        add("str", event)
-
-    if is_ctr(event):
-        add("ctr", event)
-
-# =========================
-# DASHBOARD (ALWAYS SAFE RENDER)
+# DASHBOARD
 # =========================
 st.markdown("## 🔴 LIVE SOC DASHBOARD")
 
@@ -209,7 +199,7 @@ if st.session_state.last_event:
         st.metric("CTR", len(st.session_state.ctr))
 
 # =========================
-# TABLES (NEVER EMPTY VISUAL FAIL)
+# TABLES (FORCE VISIBILITY)
 # =========================
 st.markdown("## 🚨 ALERTS")
 st.dataframe(pd.DataFrame(st.session_state.alerts))
@@ -221,13 +211,15 @@ st.markdown("## 📄 CTR")
 st.dataframe(pd.DataFrame(st.session_state.ctr))
 
 # =========================
-# GRAPH (FINAL FIX)
+# GRAPH (VISUAL FIX - NETWORKX)
 # =========================
-st.markdown("## 🕸️ FRAUD GRAPH")
+st.markdown("## 🕸️ FRAUD GRAPH (VISUAL)")
 
-graph_df = pd.DataFrame.from_dict(st.session_state.graph, orient="index")
+G = nx.Graph()
+for edge in st.session_state.graph_edges:
+    G.add_edge(edge[0], edge[1])
 
-if len(graph_df) == 0:
-    st.info("No graph data yet. Generate transactions.")
-else:
-    st.dataframe(graph_df)
+fig, ax = plt.subplots()
+nx.draw(G, with_labels=True, node_color="lightblue", node_size=1500, ax=ax)
+
+st.pyplot(fig)
