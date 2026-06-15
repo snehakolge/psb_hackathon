@@ -7,21 +7,33 @@ import os
 from datetime import datetime
 
 # =========================
-# PAGE CONFIG
+# CONFIG
 # =========================
-st.set_page_config(page_title="Enterprise SOC v6", layout="wide")
-
-st.title("🏦 Enterprise Fraud SOC v6 (Bank Production Simulation)")
+st.set_page_config(page_title="Bank SOC v7", layout="wide")
+st.title("🏦 Enterprise Fraud SOC v7 (Production Stable Engine)")
 
 # =========================
-# STATE INIT
+# SAFE STATE INIT (CRITICAL FIX)
 # =========================
-for k in ["running", "history", "alerts", "str", "ctr", "cases", "logs"]:
-    if k not in st.session_state:
-        st.session_state[k] = [] if k != "running" else False
+def init_state():
+    defaults = {
+        "running": False,
+        "history": [],
+        "alerts": [],
+        "str": [],
+        "ctr": [],
+        "audit_log": [],
+        "case_id": 1000
+    }
 
-if "case_id" not in st.session_state:
-    st.session_state.case_id = 1000
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+init_state()
+
+# FORCE TYPE SAFETY (IMPORTANT FIX FOR YOUR ERROR)
+st.session_state.case_id = int(st.session_state.case_id)
 
 # =========================
 # MODEL LOAD
@@ -30,7 +42,7 @@ MODEL_PATH = "models/fraud_ensemble.pkl"
 bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
 # =========================
-# CONTROL PANEL
+# SIDEBAR CONTROLS
 # =========================
 st.sidebar.header("⚙️ SOC CONTROL PANEL")
 
@@ -49,16 +61,15 @@ st.sidebar.metric("CTR", len(st.session_state.ctr))
 # =========================
 def generate_txn():
     return {
-        "amount": int(np.random.lognormal(12, 1.2)),
+        "amount": int(np.random.lognormal(12, 1.1)),
         "velocity": random.randint(0, 220),
-        "balance": random.randint(0, 500000)
+        "balance": random.randint(0, 400000)
     }
 
 # =========================
-# ML SCORE
+# ML SCORE (SAFE)
 # =========================
 def ml_score(txn):
-
     if not bundle:
         return 0.5
 
@@ -67,16 +78,19 @@ def ml_score(txn):
     xgb = bundle["xgb_model"]
     lgbm = bundle["lgbm_model"]
 
-    p1 = xgb.predict_proba(X)[0][1]
-    p2 = lgbm.predict_proba(X)[0][1]
-
-    return 0.55 * p1 + 0.45 * p2
+    return 0.55 * xgb.predict_proba(X)[0][1] + 0.45 * lgbm.predict_proba(X)[0][1]
 
 # =========================
-# EXPLAINABILITY ENGINE
+# CASE GENERATOR (FIXED)
+# =========================
+def new_case():
+    st.session_state.case_id = int(st.session_state.case_id) + 1
+    return f"CASE-{st.session_state.case_id}"
+
+# =========================
+# EXPLANATION ENGINE
 # =========================
 def explain(txn, history):
-
     reasons = []
 
     if txn["amount"] > 300000:
@@ -86,17 +100,17 @@ def explain(txn, history):
         reasons.append("Velocity spike detected")
 
     if txn["balance"] < 10000:
-        reasons.append("Low balance risk pattern")
+        reasons.append("Low balance risk")
 
     if len(history) > 5:
         avg = np.mean([h["txn"]["amount"] for h in history[-5:]])
         if txn["amount"] > 2 * avg:
-            reasons.append("Deviation from customer baseline")
+            reasons.append("Deviation from user baseline")
 
-    return reasons
+    return reasons if reasons else ["Normal behavior pattern"]
 
 # =========================
-# SOC RISK ENGINE (CORE)
+# RISK ENGINE (STABLE)
 # =========================
 def risk_engine(txn, history):
 
@@ -108,12 +122,13 @@ def risk_engine(txn, history):
     else:
         avg_amt, avg_vel = txn["amount"], txn["velocity"]
 
-    anomaly = 0
-    anomaly += txn["amount"] > 2 * avg_amt
-    anomaly += txn["velocity"] > 1.7 * avg_vel
-    anomaly += txn["balance"] < 5000
+    anomaly = (
+        txn["amount"] > 2 * avg_amt,
+        txn["velocity"] > 1.7 * avg_vel,
+        txn["balance"] < 5000
+    )
 
-    anomaly_score = anomaly / 3
+    anomaly_score = sum(anomaly) / 3
 
     final = 0.65 * ml + 0.35 * anomaly_score
 
@@ -124,46 +139,37 @@ def risk_engine(txn, history):
     else:
         decision = "SAFE"
 
-    return ml, final, decision, anomaly_score
+    return ml, final, decision
 
 # =========================
-# STR ENGINE (ENTERPRISE)
+# STR ENGINE (FIXED + AUDIT SAFE)
 # =========================
 def is_str(event, history):
 
-    if len(history) < 8:
+    if len(history) < 6:
         return False
 
-    last = history[-10:]
+    recent = history[-10:]
 
-    avg_amt = np.mean([h["txn"]["amount"] for h in last])
-    avg_vel = np.mean([h["txn"]["velocity"] for h in last])
+    avg_amt = np.mean([h["txn"]["amount"] for h in recent])
+    avg_vel = np.mean([h["txn"]["velocity"] for h in recent])
 
-    spike_amt = event["txn"]["amount"] > 2.5 * avg_amt
-    spike_vel = event["txn"]["velocity"] > 2 * avg_vel
+    conditions = [
+        event["txn"]["amount"] > 2.5 * avg_amt,
+        event["txn"]["velocity"] > 2 * avg_vel,
+        event["final"] > 0.7
+    ]
 
-    risk_flag = event["final"] > 0.68
-
-    # MULTI-SIGNAL STR (BANK STYLE)
-    return (spike_amt + spike_vel + risk_flag) >= 2
+    return sum(conditions) >= 2
 
 # =========================
-# CTR ENGINE (COMPLIANCE RULE)
+# CTR ENGINE (FIXED)
 # =========================
 def is_ctr(event):
-    txn = event["txn"]
-
     return (
-        txn["amount"] > 200000 and
-        txn["velocity"] > 100
+        event["txn"]["amount"] > 250000 and
+        event["txn"]["velocity"] > 100
     )
-
-# =========================
-# CASE SYSTEM
-# =========================
-def new_case():
-    st.session_state.case_id += 1
-    return f"CASE-{st.session_state.case_id}"
 
 # =========================
 # STREAM ENGINE
@@ -173,7 +179,7 @@ placeholder = st.empty()
 if st.session_state.running:
 
     txn = generate_txn()
-    ml, final, decision, anomaly = risk_engine(txn, st.session_state.history)
+    ml, final, decision = risk_engine(txn, st.session_state.history)
 
     case = new_case()
     now = datetime.now().strftime("%H:%M:%S")
@@ -188,28 +194,34 @@ if st.session_state.running:
         "reason": explain(txn, st.session_state.history)
     }
 
-    # ADD TO MEMORY FIRST (IMPORTANT)
+    # =========================
+    # AUDIT FIRST (IMPORTANT)
+    # =========================
     st.session_state.history.append(event)
-    st.session_state.history = st.session_state.history[-60:]
+    st.session_state.audit_log.append(event)
 
+    st.session_state.history = st.session_state.history[-60:]
+    st.session_state.audit_log = st.session_state.audit_log[-100:]
+
+    # =========================
     # ALERT ENGINE
+    # =========================
     if decision != "SAFE":
         st.session_state.alerts.append(event)
 
-    # STR / CTR
     if is_str(event, st.session_state.history):
         st.session_state.str.append(event)
 
     if is_ctr(event):
         st.session_state.ctr.append(event)
 
-    # LIMIT
+    # LIMIT SIZE (STABILITY FIX)
     st.session_state.alerts = st.session_state.alerts[-30:]
     st.session_state.str = st.session_state.str[-30:]
     st.session_state.ctr = st.session_state.ctr[-30:]
 
     # =========================
-    # DASHBOARD UI
+    # UI
     # =========================
     with placeholder.container():
 
@@ -223,7 +235,6 @@ if st.session_state.running:
 
         with c2:
             st.subheader("🧠 AI ENGINE")
-
             st.metric("ML Score", round(ml, 4))
             st.metric("Final Risk", round(final, 4))
             st.write("Decision:", decision)
@@ -234,23 +245,15 @@ if st.session_state.running:
 
         with c3:
             st.subheader("📊 SOC HEALTH")
-
             st.metric("Alerts", len(st.session_state.alerts))
             st.metric("STR", len(st.session_state.str))
             st.metric("CTR", len(st.session_state.ctr))
-
-            drift = np.std([h["final"] for h in st.session_state.history[-20:]]) if st.session_state.history else 0
-
-            if drift > 0.25:
-                st.error(f"📉 DRIFT ALERT: {round(drift,3)}")
-            else:
-                st.success(f"📈 STABLE: {round(drift,3)}")
 
     time.sleep(1)
     st.rerun()
 
 # =========================
-# SOC TABLES
+# TABLE VIEW (FINAL SOC LAYER)
 # =========================
 st.markdown("---")
 
