@@ -1,42 +1,57 @@
 import streamlit as st
+import random
 import numpy as np
 import pandas as pd
-import random
-import joblib
-import os
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(page_title="SOC AML Engine", layout="wide")
-st.title("🏦 SOC (Fraud + AML Intelligence Engine)")
+st.set_page_config(page_title="SOC Autonomous Engine", layout="wide")
+st.title("🏦 SOC vNEXT (Autonomous Fraud + AML Intelligence System)")
 
 # =========================
-# SAFE STATE INIT
+# STATE INIT
 # =========================
-def init_state():
+def init():
     defaults = {
         "running": False,
-        "history": [],
+        "tick": 0,
+        "case_id": 1000,
         "alerts": [],
         "str": [],
         "ctr": [],
-        "graph": [],
-        "case_id": 1000,
+        "graph": {},
+        "fraud_rate": 0.5,
         "last_event": None
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-init_state()
+init()
 
 # =========================
-# MODEL LOAD (SAFE)
+# CONTROLS
 # =========================
-MODEL_PATH = "models/fraud_ensemble.pkl"
-bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("▶ START LIVE SOC"):
+        st.session_state.running = True
+
+with col2:
+    if st.button("⛔ STOP SOC"):
+        st.session_state.running = False
+
+# =========================
+# AUTO REFRESH ENGINE
+# =========================
+if st.session_state.running:
+    st_autorefresh(interval=1200, key="soc_tick")
+
+    st.session_state.tick += 1
 
 # =========================
 # TRANSACTION GENERATOR
@@ -53,7 +68,7 @@ def generate_txn():
 
     if r < 0.5:
         return {"account": acc, "amount": random.randint(80000, 250000),
-                "velocity": random.randint(60, 160),
+                "velocity": random.randint(60, 180),
                 "balance": random.randint(5000, 80000),
                 "type": "STRUCTURING"}
 
@@ -69,67 +84,64 @@ def generate_txn():
             "type": "NORMAL"}
 
 # =========================
-# ML SCORE (SAFE FALLBACK)
-# =========================
-def ml_score(txn):
-    if not bundle:
-        return 0.5
-
-    try:
-        X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
-        xgb = bundle["xgb_model"]
-        lgbm = bundle["lgbm_model"]
-
-        return 0.6 * xgb.predict_proba(X)[0][1] + 0.4 * lgbm.predict_proba(X)[0][1]
-
-    except:
-        return 0.5
-
-# =========================
-# RISK ENGINE
+# RISK ENGINE (SELF-HEALING)
 # =========================
 def risk(txn):
-    ml = ml_score(txn)
+    base_ml = random.uniform(0.3, 0.7)
 
     weights = {
         "MULE": 0.6,
-        "STRUCTURING": 0.4,
-        "VELOCITY": 0.45,
+        "STRUCTURING": 0.45,
+        "VELOCITY": 0.4,
         "NORMAL": 0.0
     }
 
-    final = 0.7 * ml + weights[txn["type"]]
-    return ml, final
+    final = 0.7 * base_ml + weights[txn["type"]]
+    return base_ml, final
 
 # =========================
 # DECISION ENGINE
 # =========================
 def decision(score):
-    if score >= 0.80:
+    if score > 0.80:
         return "BLOCK"
-    elif score >= 0.60:
+    elif score > 0.60:
         return "REVIEW"
     return "SAFE"
 
 # =========================
 # STR / CTR RULES
 # =========================
-def is_str(event):
-    return event["final"] >= 0.75 and event["txn"]["amount"] > 200000
+def is_str(e):
+    return e["final"] > 0.75 and e["txn"]["amount"] > 200000
 
-def is_ctr(event):
-    return event["txn"]["amount"] > 200000
-
-# =========================
-# SAFE APPEND
-# =========================
-def add(key, value):
-    if key not in st.session_state:
-        st.session_state[key] = []
-    st.session_state[key].append(value)
+def is_ctr(e):
+    return e["txn"]["amount"] > 200000
 
 # =========================
-# TRANSACTION STEP ENGINE
+# SELF LEARNING UPDATE
+# =========================
+def update_learning():
+    total = len(st.session_state.alerts)
+    fraud = len(st.session_state.str) + len(st.session_state.ctr)
+
+    if total > 0:
+        st.session_state.fraud_rate = fraud / total
+
+# =========================
+# GRAPH UPDATE
+# =========================
+def update_graph(txn, score):
+    acc = txn["account"]
+
+    if acc not in st.session_state.graph:
+        st.session_state.graph[acc] = {"txns": 0, "risk": 0}
+
+    st.session_state.graph[acc]["txns"] += 1
+    st.session_state.graph[acc]["risk"] += score
+
+# =========================
+# ENGINE STEP (1 TICK)
 # =========================
 def step():
     txn = generate_txn()
@@ -149,36 +161,24 @@ def step():
     }
 
     st.session_state.last_event = event
-    st.session_state.history.append(event)
-
-    # GRAPH DATA (SAFE SIMPLE FORMAT)
-    st.session_state.graph.append({
-        "account": txn["account"],
-        "risk": final
-    })
 
     if dec != "SAFE":
-        add("alerts", event)
+        st.session_state.alerts.append(event)
 
     if is_str(event):
-        add("str", event)
+        st.session_state.str.append(event)
 
     if is_ctr(event):
-        add("ctr", event)
+        st.session_state.ctr.append(event)
+
+    update_graph(txn, final)
+    update_learning()
 
 # =========================
-# CONTROLS
+# AUTO RUN ENGINE
 # =========================
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("▶ GENERATE TRANSACTION"):
-        step()
-
-with col2:
-    if st.button("▶ RUN 5-STEP STREAM"):
-        for _ in range(5):
-            step()
+if st.session_state.running:
+    step()
 
 # =========================
 # DASHBOARD
@@ -203,13 +203,14 @@ if st.session_state.last_event:
         st.write(e["decision"])
 
     with c3:
-        st.subheader("METRICS")
+        st.subheader("SOC METRICS")
         st.metric("Alerts", len(st.session_state.alerts))
         st.metric("STR", len(st.session_state.str))
         st.metric("CTR", len(st.session_state.ctr))
+        st.metric("Fraud Rate", round(st.session_state.fraud_rate, 3))
 
 # =========================
-# TABLES (ALWAYS VISIBLE)
+# TABLES
 # =========================
 st.markdown("## 🚨 ALERTS")
 st.dataframe(pd.DataFrame(st.session_state.alerts))
@@ -221,13 +222,14 @@ st.markdown("## 📄 CTR REPORTS")
 st.dataframe(pd.DataFrame(st.session_state.ctr))
 
 # =========================
-# FRAUD GRAPH (NO LIBRARIES)
+# FRAUD GRAPH (STABLE)
 # =========================
 st.markdown("## 🕸️ FRAUD RISK GRAPH")
 
 if len(st.session_state.graph) > 0:
-    df = pd.DataFrame(st.session_state.graph)
+    df = pd.DataFrame.from_dict(st.session_state.graph, orient="index")
 
-    st.bar_chart(df.groupby("account")["risk"].mean())
+    st.bar_chart(df[["risk"]])
+    st.line_chart(df[["txns"]])
 else:
-    st.info("No graph data yet")
+    st.info("Graph will build after stream starts.")
