@@ -10,11 +10,11 @@ from datetime import datetime
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(page_title="SOC v10.2 RBI Fraud Engine", layout="wide")
-st.title("🏦 SOC v10.2 (Bank-Grade Fraud + AML Intelligence System)")
+st.set_page_config(page_title="SOC v10.3 Stable Bank Engine", layout="wide")
+st.title("🏦 SOC v10.3 (Stable AML + Fraud Intelligence System)")
 
 # =========================
-# STATE INIT (SAFE)
+# SAFE STATE INIT
 # =========================
 def init_state():
     defaults = {
@@ -38,13 +38,21 @@ if not isinstance(st.session_state.graph, dict):
     st.session_state.graph = {}
 
 # =========================
+# SAFE APPEND FUNCTION (CRITICAL FIX)
+# =========================
+def safe_append(key, value):
+    if key not in st.session_state:
+        st.session_state[key] = []
+    st.session_state[key].append(value)
+
+# =========================
 # MODEL LOAD
 # =========================
 MODEL_PATH = "models/fraud_ensemble.pkl"
 bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
 # =========================
-# SIDEBAR CONTROL
+# SIDEBAR
 # =========================
 st.sidebar.header("⚙️ SOC CONTROL PANEL")
 
@@ -59,7 +67,7 @@ st.sidebar.metric("STR", len(st.session_state.str))
 st.sidebar.metric("CTR", len(st.session_state.ctr))
 
 # =========================
-# TXN GENERATOR (ATTACK SIMULATION)
+# TXN GENERATOR
 # =========================
 def generate_txn():
     r = random.random()
@@ -110,7 +118,7 @@ def new_case():
     return f"CASE-{st.session_state.case_id}"
 
 # =========================
-# RISK ENGINE (SINGLE TRUTH)
+# RISK ENGINE
 # =========================
 def risk_engine(txn, history):
 
@@ -142,7 +150,7 @@ def risk_engine(txn, history):
     return ml, final_score
 
 # =========================
-# DECISION ENGINE (FIXED SINGLE TRUTH)
+# DECISION ENGINE
 # =========================
 def decision_engine(score):
     if score >= 0.80:
@@ -152,23 +160,20 @@ def decision_engine(score):
     return "SAFE"
 
 # =========================
-# EXPLANATION ENGINE (CONSISTENT, SCORE-BASED ONLY)
+# EXPLANATION ENGINE (CONSISTENT)
 # =========================
 def explain(txn, score):
 
     if score >= 0.80:
-        return ["CRITICAL FRAUD DETECTED (AUTO BLOCK THRESHOLD)"]
+        return ["CRITICAL FRAUD DETECTED"]
 
     elif score >= 0.60:
-        return ["HIGH RISK BEHAVIOR DETECTED", f"{txn['type']} pattern observed"]
+        return ["HIGH RISK BEHAVIOR", f"{txn['type']} pattern detected"]
 
-    elif score >= 0.40:
-        return ["SUSPICIOUS TRANSACTION SIGNALS"]
-
-    return ["NORMAL BEHAVIOR CONFIRMED"]
+    return ["NORMAL BEHAVIOR"]
 
 # =========================
-# STR ENGINE (FIXED)
+# STR RULES
 # =========================
 def is_str(event):
     return (
@@ -178,13 +183,13 @@ def is_str(event):
     )
 
 # =========================
-# CTR ENGINE (FIXED)
+# CTR RULES
 # =========================
 def is_ctr(event):
     return event["txn"]["amount"] >= 200000
 
 # =========================
-# FRAUD GRAPH (FIXED + STABLE)
+# FRAUD GRAPH
 # =========================
 def update_graph(txn, score):
 
@@ -193,18 +198,16 @@ def update_graph(txn, score):
     if acc not in st.session_state.graph:
         st.session_state.graph[acc] = {
             "txns": 0,
-            "risk_hits": 0,
-            "last_score": 0.0
+            "risk_hits": 0
         }
 
     st.session_state.graph[acc]["txns"] += 1
-    st.session_state.graph[acc]["last_score"] = score
 
-    if score >= 0.60:
+    if score >= 0.6:
         st.session_state.graph[acc]["risk_hits"] += 1
 
 # =========================
-# STREAM ENGINE
+# STREAM LOOP
 # =========================
 placeholder = st.empty()
 
@@ -239,9 +242,9 @@ if st.session_state.running:
     if decision != "SAFE":
         st.session_state.alerts.append(event)
 
-    # STR / CTR STORAGE (SAFE COPY)
+    # STR / CTR (SAFE PERSISTENCE)
     if is_str(event):
-        st.session_state.str.append({
+        safe_append("str", {
             "case": case,
             "time": now,
             "amount": txn["amount"],
@@ -251,14 +254,14 @@ if st.session_state.running:
         })
 
     if is_ctr(event):
-        st.session_state.ctr.append({
+        safe_append("ctr", {
             "case": case,
             "time": now,
             "amount": txn["amount"]
         })
 
     # =========================
-    # UI STREAM
+    # UI
     # =========================
     with placeholder.container():
 
@@ -314,7 +317,7 @@ st.subheader("🕸️ FRAUD NETWORK GRAPH")
 st.json(st.session_state.graph)
 
 # =========================
-# RBI EXPORT (BONUS FIXED)
+# RBI EXPORT
 # =========================
 st.subheader("📥 RBI COMPLIANCE EXPORT")
 
