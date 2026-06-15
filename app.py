@@ -5,27 +5,23 @@ import pandas as pd
 from datetime import datetime
 import time
 
-# =========================
-# PAGE
-# =========================
-st.set_page_config(page_title="SOC AI Engine", layout="wide")
-st.title("🏦 SOC vNEXT (Autonomous AML + Fraud Intelligence)")
+st.set_page_config(page_title="SOC Stable Engine", layout="wide")
+st.title("🏦 SOC vNEXT (Stable Autonomous AML System)")
 
 # =========================
-# STATE INIT
+# SAFE INIT
 # =========================
 def init():
     defaults = {
         "running": False,
-        "tick": 0,
         "case_id": 1000,
         "alerts": [],
         "str": [],
         "ctr": [],
-        "graph": {},
+        "graph": {},   # FIXED STRUCTURE
         "fraud_rate": 0.5,
         "last_event": None,
-        "feedback": []
+        "tick": 0
     }
 
     for k, v in defaults.items():
@@ -35,12 +31,12 @@ def init():
 init()
 
 # =========================
-# CONTROL PANEL
+# CONTROLS
 # =========================
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("▶ START SOC STREAM"):
+    if st.button("▶ START SOC"):
         st.session_state.running = True
 
 with col2:
@@ -48,14 +44,18 @@ with col2:
         st.session_state.running = False
 
 # =========================
-# TRANSACTION GENERATOR
+# TXN GENERATOR (VARIATION FIX)
 # =========================
 def gen_txn():
-    r = random.random()
+    seed = st.session_state.tick + random.randint(1, 1000)
+
+    random.seed(seed)
+
     acc = random.randint(1000, 1015)
+    r = random.random()
 
     if r < 0.3:
-        return {"account": acc, "amount": random.randint(250000, 900000),
+        return {"account": acc, "amount": random.randint(200000, 900000),
                 "velocity": random.randint(120, 260),
                 "balance": random.randint(0, 15000),
                 "type": "MULE"}
@@ -77,13 +77,13 @@ def gen_txn():
 def risk(txn):
     ml = random.uniform(0.3, 0.8)
 
-    weight = {
+    weights = {
         "MULE": 0.6,
         "STRUCTURING": 0.4,
         "NORMAL": 0.0
     }
 
-    final = 0.7 * ml + weight[txn["type"]]
+    final = 0.7 * ml + weights[txn["type"]]
     return ml, final
 
 # =========================
@@ -92,7 +92,7 @@ def risk(txn):
 def decision(score):
     if score > 0.80:
         return "BLOCK"
-    elif score > 0.60:
+    if score > 0.60:
         return "REVIEW"
     return "SAFE"
 
@@ -106,19 +106,24 @@ def is_ctr(e):
     return e["txn"]["amount"] > 200000
 
 # =========================
-# SELF HEALING
+# SAFE GRAPH UPDATE (FIXED)
 # =========================
-def update_learning():
-    total = len(st.session_state.alerts)
-    fraud = len(st.session_state.str) + len(st.session_state.ctr)
+def update_graph(txn, score):
+    acc = str(txn["account"])
 
-    if total > 0:
-        st.session_state.fraud_rate = fraud / total
+    if acc not in st.session_state.graph:
+        st.session_state.graph[acc] = {"risk": 0.0, "txns": 0}
+
+    st.session_state.graph[acc]["risk"] += float(score)
+    st.session_state.graph[acc]["txns"] += 1
 
 # =========================
-# STEP ENGINE
+# ENGINE STEP
 # =========================
 def step():
+
+    st.session_state.tick += 1
+
     txn = gen_txn()
     ml, final = risk(txn)
     dec = decision(final)
@@ -146,18 +151,10 @@ def step():
     if is_ctr(event):
         st.session_state.ctr.append(event)
 
-    # graph update
-    acc = txn["account"]
-    if acc not in st.session_state.graph:
-        st.session_state.graph[acc] = {"risk": 0, "txns": 0}
-
-    st.session_state.graph[acc]["risk"] += final
-    st.session_state.graph[acc]["txns"] += 1
-
-    update_learning()
+    update_graph(txn, final)
 
 # =========================
-# AUTO LOOP (SAFE STREAMLIT WAY)
+# AUTO LOOP (SAFE)
 # =========================
 if st.session_state.running:
     step()
@@ -187,14 +184,13 @@ if st.session_state.last_event:
         st.write(e["decision"])
 
     with c3:
-        st.subheader("SOC METRICS")
+        st.subheader("METRICS")
         st.metric("Alerts", len(st.session_state.alerts))
         st.metric("STR", len(st.session_state.str))
         st.metric("CTR", len(st.session_state.ctr))
-        st.metric("Fraud Rate", round(st.session_state.fraud_rate, 3))
 
 # =========================
-# TABLES
+# TABLES (ALWAYS STABLE)
 # =========================
 st.markdown("## 🚨 ALERTS")
 st.dataframe(pd.DataFrame(st.session_state.alerts))
@@ -206,14 +202,19 @@ st.markdown("## 📄 CTR")
 st.dataframe(pd.DataFrame(st.session_state.ctr))
 
 # =========================
-# GRAPH
+# GRAPH FIX (NO from_dict)
 # =========================
 st.markdown("## 🕸️ FRAUD GRAPH")
 
-df = pd.DataFrame.from_dict(st.session_state.graph, orient="index")
+if len(st.session_state.graph) > 0:
 
-if len(df) > 0:
-    st.bar_chart(df["risk"])
-    st.line_chart(df["txns"])
+    df = pd.DataFrame([
+        {"account": k, "risk": v["risk"], "txns": v["txns"]}
+        for k, v in st.session_state.graph.items()
+    ])
+
+    st.bar_chart(df.set_index("account")[["risk"]])
+    st.line_chart(df.set_index("account")[["txns"]])
+
 else:
-    st.info("Graph building after stream starts.")
+    st.info("Graph building after stream starts")
