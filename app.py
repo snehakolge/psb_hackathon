@@ -5,20 +5,16 @@ import time
 import threading
 import joblib
 import os
-from streamlit_autorefresh import st_autorefresh
+
+from sklearn.preprocessing import StandardScaler
 
 # =========================
 # CONFIG
 # =========================
 st.set_page_config(page_title="Agentic Fraud SOC", layout="wide")
-st.title("🏦 Agentic Fraud SOC (REAL-TIME STREAM + MEMORY + STR/CTR)")
+st.title("🏦 Agentic Fraud SOC (Stable Real-Time Stream)")
 
 os.makedirs("models", exist_ok=True)
-
-# =========================
-# AUTO REFRESH (CRITICAL FIX)
-# =========================
-st_autorefresh(interval=1000, key="soc_refresh")
 
 # =========================
 # SESSION STATE
@@ -82,7 +78,7 @@ def update_memory(txn, fraud):
         m["fraud_count"] += 1
 
 # =========================
-# AGENTS (MEMORY-BASED)
+# AGENTS (LEARNING STYLE)
 # =========================
 def velocity_agent(txn):
     m = st.session_state.memory
@@ -117,18 +113,16 @@ def reasoning(prob, signals, memory):
 # =========================
 # STR / CTR
 # =========================
-def reports(event):
+def generate_reports(event):
 
     txn = event["txn"]
 
-    # CTR
     if txn["amount"] > 1000000:
         st.session_state.ctr_reports.append({
             "type": "CTR",
             "txn": txn
         })
 
-    # STR
     if event["final_score"] > 0.75:
         st.session_state.str_reports.append({
             "type": "STR",
@@ -137,7 +131,7 @@ def reports(event):
         })
 
 # =========================
-# BACKGROUND STREAM ENGINE
+# BACKGROUND ENGINE (THREAD)
 # =========================
 def stream_engine():
 
@@ -168,7 +162,14 @@ def stream_engine():
             "balance": balance_agent(txn)
         }
 
-        decision, final_score = reasoning(prob, signals, st.session_state.memory)
+        final_score = 0.55 * prob + 0.30 * np.mean(list(signals.values())) + 0.15 * (st.session_state.memory["fraud_count"]/10)
+
+        if final_score > 0.75:
+            decision = "BLOCK 🚨"
+        elif final_score > 0.45:
+            decision = "REVIEW ⚠️"
+        else:
+            decision = "SAFE ✅"
 
         event = {
             "txn": txn,
@@ -186,7 +187,7 @@ def stream_engine():
         if decision != "SAFE ✅":
             st.session_state.soc_queue.append(event)
 
-        reports(event)
+        generate_reports(event)
 
         time.sleep(1)
 
@@ -204,7 +205,7 @@ if "thread_started" not in st.session_state:
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("▶️ Stop Stream"):
+    if st.button("⛔ Stop Stream"):
         st.session_state.running = False
 
 with col2:
@@ -228,7 +229,7 @@ if event:
     st.write("Decision:", event.get("decision", "N/A"))
 
 # =========================
-# SOC ALERT QUEUE
+# SOC QUEUE
 # =========================
 st.subheader("🚨 SOC ALERT QUEUE")
 
@@ -250,3 +251,10 @@ st.subheader("📄 CTR REPORTS")
 
 for i in st.session_state.ctr_reports[-10:][::-1]:
     st.json(i)
+
+# =========================
+# IMPORTANT: FORCE REFRESH LOOP
+# =========================
+if st.session_state.running:
+    time.sleep(1)
+    st.rerun()
