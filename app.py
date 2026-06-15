@@ -1,27 +1,28 @@
 import streamlit as st
 import numpy as np
-import random
 import pandas as pd
+import random
 import joblib
 import os
-import networkx as nx
-import matplotlib.pyplot as plt
 from datetime import datetime
 
-st.set_page_config(page_title="SOC v14 AML Engine", layout="wide")
-st.title("🏦 SOC v14 (Bank-Grade AML + Fraud Intelligence System)")
+# =========================
+# PAGE CONFIG
+# =========================
+st.set_page_config(page_title="SOC AML Engine", layout="wide")
+st.title("🏦 SOC (Fraud + AML Intelligence Engine)")
 
 # =========================
-# INIT STATE (CRITICAL FIX)
+# SAFE STATE INIT
 # =========================
-def init():
+def init_state():
     defaults = {
         "running": False,
         "history": [],
         "alerts": [],
         "str": [],
         "ctr": [],
-        "graph_edges": [],
+        "graph": [],
         "case_id": 1000,
         "last_event": None
     }
@@ -29,50 +30,60 @@ def init():
         if k not in st.session_state:
             st.session_state[k] = v
 
-init()
+init_state()
 
 # =========================
-# MODEL (optional)
+# MODEL LOAD (SAFE)
 # =========================
 MODEL_PATH = "models/fraud_ensemble.pkl"
 bundle = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
 # =========================
-# TRANSACTION STREAM
+# TRANSACTION GENERATOR
 # =========================
-def gen_txn():
+def generate_txn():
     r = random.random()
     acc = random.randint(1000, 1015)
 
-    if r < 0.3:
+    if r < 0.25:
         return {"account": acc, "amount": random.randint(300000, 900000),
                 "velocity": random.randint(120, 260),
                 "balance": random.randint(0, 15000),
                 "type": "MULE"}
 
-    if r < 0.6:
+    if r < 0.5:
         return {"account": acc, "amount": random.randint(80000, 250000),
-                "velocity": random.randint(60, 180),
+                "velocity": random.randint(60, 160),
                 "balance": random.randint(5000, 80000),
                 "type": "STRUCTURING"}
 
-    return {"account": acc, "amount": random.randint(5000, 200000),
-            "velocity": random.randint(10, 120),
+    if r < 0.75:
+        return {"account": acc, "amount": random.randint(50000, 300000),
+                "velocity": random.randint(150, 280),
+                "balance": random.randint(0, 30000),
+                "type": "VELOCITY"}
+
+    return {"account": acc, "amount": random.randint(5000, 120000),
+            "velocity": random.randint(10, 80),
             "balance": random.randint(50000, 600000),
             "type": "NORMAL"}
 
 # =========================
-# ML SCORE
+# ML SCORE (SAFE FALLBACK)
 # =========================
 def ml_score(txn):
     if not bundle:
         return 0.5
 
-    X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
-    xgb = bundle["xgb_model"]
-    lgbm = bundle["lgbm_model"]
+    try:
+        X = np.array([[txn["amount"], txn["velocity"], txn["balance"]]])
+        xgb = bundle["xgb_model"]
+        lgbm = bundle["lgbm_model"]
 
-    return 0.6 * xgb.predict_proba(X)[0][1] + 0.4 * lgbm.predict_proba(X)[0][1]
+        return 0.6 * xgb.predict_proba(X)[0][1] + 0.4 * lgbm.predict_proba(X)[0][1]
+
+    except:
+        return 0.5
 
 # =========================
 # RISK ENGINE
@@ -80,95 +91,94 @@ def ml_score(txn):
 def risk(txn):
     ml = ml_score(txn)
 
-    attack = {
+    weights = {
         "MULE": 0.6,
         "STRUCTURING": 0.4,
+        "VELOCITY": 0.45,
         "NORMAL": 0.0
     }
 
-    final = 0.7 * ml + attack[txn["type"]]
+    final = 0.7 * ml + weights[txn["type"]]
     return ml, final
 
 # =========================
 # DECISION ENGINE
 # =========================
 def decision(score):
-    if score > 0.80:
+    if score >= 0.80:
         return "BLOCK"
-    if score > 0.60:
+    elif score >= 0.60:
         return "REVIEW"
     return "SAFE"
 
 # =========================
-# STR / CTR LOGIC
+# STR / CTR RULES
 # =========================
-def is_str(e):
-    return e["final"] > 0.75 and e["txn"]["amount"] > 200000
+def is_str(event):
+    return event["final"] >= 0.75 and event["txn"]["amount"] > 200000
 
-def is_ctr(e):
-    return e["txn"]["amount"] > 200000
-
-# =========================
-# GRAPH UPDATE (REAL NETWORK)
-# =========================
-def update_graph(txn, score):
-    acc = txn["account"]
-
-    st.session_state.graph_edges.append((
-        acc,
-        "RISK" if score > 0.6 else "SAFE"
-    ))
+def is_ctr(event):
+    return event["txn"]["amount"] > 200000
 
 # =========================
-# MULTI-STREAM GENERATOR (KEY FIX)
+# SAFE APPEND
 # =========================
-def generate_batch(n=3):
-    for _ in range(n):
-
-        txn = gen_txn()
-        ml, final = risk(txn)
-        dec = decision(final)
-
-        case = st.session_state.case_id
-        st.session_state.case_id += 1
-
-        event = {
-            "case": f"CASE-{case}",
-            "txn": txn,
-            "ml": ml,
-            "final": final,
-            "decision": dec,
-            "time": datetime.now().strftime("%H:%M:%S")
-        }
-
-        st.session_state.history.append(event)
-        st.session_state.last_event = event
-
-        if dec != "SAFE":
-            st.session_state.alerts.append(event)
-
-        if is_str(event):
-            st.session_state.str.append(event)
-
-        if is_ctr(event):
-            st.session_state.ctr.append(event)
-
-        update_graph(txn, final)
+def add(key, value):
+    if key not in st.session_state:
+        st.session_state[key] = []
+    st.session_state[key].append(value)
 
 # =========================
-# CONTROL PANEL
+# TRANSACTION STEP ENGINE
+# =========================
+def step():
+    txn = generate_txn()
+    ml, final = risk(txn)
+    dec = decision(final)
+
+    case = st.session_state.case_id
+    st.session_state.case_id += 1
+
+    event = {
+        "case": f"CASE-{case}",
+        "txn": txn,
+        "ml": ml,
+        "final": final,
+        "decision": dec,
+        "time": datetime.now().strftime("%H:%M:%S")
+    }
+
+    st.session_state.last_event = event
+    st.session_state.history.append(event)
+
+    # GRAPH DATA (SAFE SIMPLE FORMAT)
+    st.session_state.graph.append({
+        "account": txn["account"],
+        "risk": final
+    })
+
+    if dec != "SAFE":
+        add("alerts", event)
+
+    if is_str(event):
+        add("str", event)
+
+    if is_ctr(event):
+        add("ctr", event)
+
+# =========================
+# CONTROLS
 # =========================
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("▶ RUN SOC STREAM (BATCH 5 EVENTS)"):
-        generate_batch(5)
+    if st.button("▶ GENERATE TRANSACTION"):
+        step()
 
 with col2:
-    if st.button("🔄 RESET SYSTEM"):
-        for k in st.session_state.keys():
-            del st.session_state[k]
-        st.rerun()
+    if st.button("▶ RUN 5-STEP STREAM"):
+        for _ in range(5):
+            step()
 
 # =========================
 # DASHBOARD
@@ -188,8 +198,8 @@ if st.session_state.last_event:
 
     with c2:
         st.subheader("AI ENGINE")
-        st.metric("ML", round(e["ml"], 4))
-        st.metric("FINAL", round(e["final"], 4))
+        st.metric("ML Score", round(e["ml"], 4))
+        st.metric("Final Score", round(e["final"], 4))
         st.write(e["decision"])
 
     with c3:
@@ -199,27 +209,25 @@ if st.session_state.last_event:
         st.metric("CTR", len(st.session_state.ctr))
 
 # =========================
-# TABLES (FORCE VISIBILITY)
+# TABLES (ALWAYS VISIBLE)
 # =========================
 st.markdown("## 🚨 ALERTS")
 st.dataframe(pd.DataFrame(st.session_state.alerts))
 
-st.markdown("## 🚨 STR")
+st.markdown("## 🚨 STR REPORTS")
 st.dataframe(pd.DataFrame(st.session_state.str))
 
-st.markdown("## 📄 CTR")
+st.markdown("## 📄 CTR REPORTS")
 st.dataframe(pd.DataFrame(st.session_state.ctr))
 
 # =========================
-# GRAPH (VISUAL FIX - NETWORKX)
+# FRAUD GRAPH (NO LIBRARIES)
 # =========================
-st.markdown("## 🕸️ FRAUD GRAPH (VISUAL)")
+st.markdown("## 🕸️ FRAUD RISK GRAPH")
 
-G = nx.Graph()
-for edge in st.session_state.graph_edges:
-    G.add_edge(edge[0], edge[1])
+if len(st.session_state.graph) > 0:
+    df = pd.DataFrame(st.session_state.graph)
 
-fig, ax = plt.subplots()
-nx.draw(G, with_labels=True, node_color="lightblue", node_size=1500, ax=ax)
-
-st.pyplot(fig)
+    st.bar_chart(df.groupby("account")["risk"].mean())
+else:
+    st.info("No graph data yet")
